@@ -1,127 +1,77 @@
 # CLAUDE.md
 
-## Project
+## Project Snapshot
 
-**Lustre** — a native iOS app for capturing, viewing, and (eventually) training
-3D Gaussian Splats. Target users are hobbyists and prosumers who want better
-captures than the stock camera gives them, and a viewing experience that feels
-like walking through a place rather than orbiting a model.
+**Lustre** — native iOS app for capturing, viewing, and (eventually) training 3D
+Gaussian Splats. The viewing experience should feel like walking through a place,
+not orbiting a model.
 
-The full roadmap — per-feature scope, folder org, build order, and current
-status — lives in **`ROADMAP.md`**. Read the relevant section there before
-starting a feature. This file is the quick-reference contract; `ROADMAP.md` is
-the detailed plan and the live status snapshot.
+- Swift + SwiftUI. Project at `Lustre.xcodeproj` (repo root), scheme `Lustre`.
+- **Minimum iOS 18.0.** Forced by MetalSplatter, which has no version that runs
+  on iOS 16. Don't use APIs newer than 18.0 without flagging it.
+- Metal + MetalSplatter (SPM) for rendering; ARKit for 6DoF pose; AVFoundation
+  for capture; CoreMotion for motion analysis.
+- Bundle ID `com.alecborer.Lustre`. Apple Silicon only — MetalSplatter
+  `fatalError`s on x86_64.
 
-## Design principles
+**`ROADMAP.md` holds live status and the per-feature plan.** Read the relevant
+section there before starting a feature. Status is not duplicated here, because
+a second copy drifts.
 
-- Beginner-friendly defaults with expert escape hatches.
-- Built for Apple Silicon — **no cloud dependency for core features**.
-- A native iOS experience, not a port of desktop tooling.
-
-## Stack
-
-- Swift + SwiftUI
-- **Minimum iOS 16.0** — do not use APIs newer than 16.0 without flagging it.
-- Metal + **MetalSplatter** (via SPM) for splat rendering
-- ARKit (6DoF pose), AVFoundation (capture), CoreMotion (motion analysis)
-- Xcode project; develops on Apple Silicon (M4, 16GB)
-
-## Architecture — feature folders
-
-The project groups by feature. Each top-level folder is one testable,
-independently buildable area. Folders are visual groupings only.
-
-**Current state:** all code lives flat in `Lustre/Lustre/`. The intended
-feature-folder layout (once reorganized):
+## Architecture Constraints
 
 ```
 Lustre/
-├── App/         # SplatWalkApp (@main), root navigation
-├── Viewer/      # SplatRenderer, ARSplatView, PoseProvider, SplatSceneState,
-│                #   ControlsOverlay, INTEGRATION.md  ← scaffold complete
-├── Components/  # VirtualJoystick, SimulatorControlsOverlay
-├── Core/        # Shared math (matrix helpers, perspectiveProjection)
-└── Services/    # SplatIO wrapper over MetalSplatter (not yet created)
+├── App/         # LustreApp (@main), ContentView (nav root)
+├── Viewer/      # Rendering/ AR/ Simulator/ UI/ + INTEGRATION.md
+├── Components/  # VirtualJoystick
+├── Core/        # Shared math
+└── Services/    # SplatIO wrapper, SampleSplatScene
 ```
 
-**Cross-feature rule:** a feature never imports from another feature folder.
-Shared code goes in `Core`, `Services`, or `Components`, and features import
-from there. This keeps each feature self-contained and testable in isolation.
+- **No cross-feature imports.** A feature never imports from another feature
+  folder; shared code moves to `Core` / `Services` / `Components`.
+- **Preserve the `PoseProvider` seam.** It's what lets the Viewer run without
+  hardware: `ARKitPoseProvider` on device, `SimulatedPoseProvider` in the
+  simulator. Don't collapse it into either implementation.
+- **iPhone only, monoscopic AR.** Single-view rendering (`maxViewCount: 1`). No
+  visionOS, no stereo or side-by-side rendering, no iPad-specific layouts (a
+  universal binary is fine).
+- **No cloud dependency** in core capture / view / library paths.
+- **Storage:** `Documents/` for captured and saved splats (user-visible in
+  Files); `Caches/` for imports, thumbnails, anything regenerable.
+- Prefer value types and `@Observable` over ad-hoc singletons. The project sets
+  `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so types are MainActor-isolated
+  unless marked `nonisolated` — relevant any time work must leave the main
+  thread.
+- **Don't start Training.** It's research, not a commitment, and it waits until
+  Capture is mature.
+- Out of scope, don't build toward: cloud sync, sharing between Lustre users,
+  AR Quick Look for non-Lustre sharing.
 
-**The testing seam:** `PoseProvider` is the abstraction that lets the Viewer
-run without a device — `ARKitPoseProvider` on device, `SimulatedPoseProvider`
-(dual joysticks) in the simulator. Preserve this seam.
+## Session Flow
 
-## Conventions
+Headless compile check:
 
-- SwiftUI-first; prefer value types and `@Observable`/`ObservableObject` over
-  ad-hoc singletons.
-- Preferences via `@AppStorage` (see `Settings/AppPreferences`). Features
-  observe only their own slice; don't front-load settings.
-- **Storage:** `Documents/` for captured/saved splats (user-visible in the
-  Files app); `Caches/` for imports, thumbnails, and anything regenerable.
-- Splat formats: PLY / SPZ / `.splat`. MetalSplatter handles most format I/O;
-  `Services/SplatIO` is a thin app-side wrapper over it.
+```
+xcodebuild -project Lustre.xcodeproj -scheme Lustre \
+           -destination 'platform=iOS Simulator,name=iPhone 17' build
+```
 
-## Hard rules
+Confirm the simulator exists first: `xcrun simctl list devices available`.
 
-- **Don't break the Viewer scaffold** or the `PoseProvider` abstraction — the
-  architecture there is complete and is the next integration target, not a
-  rewrite candidate.
-- **No cross-feature imports.** Shared code moves to Core/Services/Components.
-- **No cloud dependency** in core capture/view/library paths.
-- **Stay within the out-of-scope list** (below). Don't build toward them.
-- **Don't start Training.** It's research; it doesn't begin until Capture is
-  mature.
-- Every step from the build order should remain shippable to TestFlight — keep
-  `main` buildable.
+**ARKit, AVFoundation capture, and CoreMotion do not work in the iOS
+Simulator.** A green simulator build does NOT verify them. When asked whether a
+device-only feature works, compile it, then say it needs on-device testing.
+Don't report it as working.
 
-## Simulator vs. device — important
+Subagents in `.claude/agents/`: **architect** plans non-trivial work before any
+code, **implementer** writes code and its tests in one pass, **code-reviewer**
+reviews after changes land, **test-runner** executes suites in isolation.
+architect and code-reviewer have no `Write` or `Edit` tool, so they report
+instead of changing code. They do have `Bash`, which is not an airtight
+sandbox — don't ask them to apply a fix, hand it to implementer.
 
-ARKit, the camera (AVFoundation), and CoreMotion **do not work in the iOS
-Simulator**. That means:
-
-- Viewer logic is testable in the simulator via `SimulatedPoseProvider`.
-- Capture, AR pose, and motion coaching require a **physical device** — a
-  successful `xcodebuild` for the simulator does NOT verify those features.
-- When asked to "verify it works" for a device-only feature, build for the
-  simulator to confirm it compiles, then tell me it needs on-device testing
-  rather than claiming it works.
-
-## Build / test / run
-
-- **Open:** `Lustre/Lustre/Lustre.xcodeproj`; build/run with the `Lustre` scheme.
-- **Simulator (Viewer logic):** uses `SimulatedPoseProvider` — dual joysticks
-  in the app control the camera. ARKit/camera do not work in the simulator.
-- **Headless compile check:**
-  ```
-  xcodebuild -project Lustre/Lustre/Lustre.xcodeproj \
-             -scheme Lustre \
-             -destination 'platform=iOS Simulator,name=iPhone 16' \
-             build
-  ```
-- **Reload after edits:** re-run from Xcode (`⌘R`); no add-on reload step needed.
-- MetalSplatter integration steps are in `Lustre/Lustre/INTEGRATION.md`.
-
-## Out of scope (do not build toward these)
-
-- Cloud sync between devices
-- Social features / sharing splats with other Lustre users
-- visionOS (Apple Vision Pro) version — related, but its own project
-- iPad-specific UI — a universal binary is fine, no custom layouts
-- AR Quick Look integration for non-Lustre sharing
-
-## Current state (mirror of ROADMAP.md status — keep in sync)
-
-- Viewer scaffold complete; **MetalSplatter not yet integrated** — this is the
-  immediate next step.
-- All other features planned, not started.
-- Repo created, public, MIT licensed. Bundle ID / App Store name reservation
-  still TBD.
-
-## Definition of "done" for any change
-
-- The app still builds and runs; the Viewer scaffold still works.
-- No new cross-feature imports introduced.
-- Device-only features are flagged for manual on-device testing rather than
-  reported as verified from a simulator build.
+Done means: the app builds and runs; no new cross-feature imports; the
+`PoseProvider` seam intact; device-only work explicitly flagged as needing
+hardware rather than claimed as verified.

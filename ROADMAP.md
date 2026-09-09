@@ -87,7 +87,7 @@ equivalent for splats.
 **Scope:**
 - Grid view with thumbnails
 - Metadata: name, capture date, file size, source (captured vs imported)
-- Import from Files (PLY, SPZ, .splat)
+- Import from Files (PLY, SPZ, .splat; SOG recognized but not yet decodable)
 - Delete, rename, share (export as PLY/SPZ via share sheet)
 - Sort by date, name, size
 
@@ -113,37 +113,59 @@ that can be regenerated.
 **Purpose:** Walk through a splat by physically moving the phone, or via
 on-screen joysticks in the simulator. The scaffold is already built.
 
-**Current state:** Architecture complete (PoseProvider abstraction, ARKit
-and Simulator implementations, scene state, controls overlay). MetalSplatter
-integration is the next step.
+**Current state:** Built and rendering. MetalSplatter is wired in and the
+sample scene renders in the simulator. The AR path compiles but has never
+executed — see the caveat below.
 
-**Sub-structure (already established):**
+**Sub-structure:**
 ```
 Viewer/
-├── AR/              # ARKitPoseProvider, ARSplatView
+├── AR/              # ARKitPoseProvider
 ├── Simulator/       # SimulatedPoseProvider, SimulatorControlsOverlay
-├── Rendering/       # SplatRenderer, PoseProvider protocol, SplatSceneState
-└── UI/              # ControlsOverlay
+├── Rendering/       # SplatRenderer, SplatRenderView, PoseProvider, SplatSceneState,
+│                    #   CameraFrameSource, PassthroughCompositor, Passthrough.metal
+├── UI/              # ViewerScreen, ViewerModel, ControlMenu, ViewerUIState, SplatGestures
+└── INTEGRATION.md
 ```
+
+No `ARSplatView`: `ViewerScreen` composes the render view with whichever pose
+provider is active, so an AR-specific view had nothing left to do.
 
 **Scope (current):**
 - 6DoF AR pose drives the virtual camera through the splat
 - Simulator mode with dual joysticks for AR-less testing
-- Scale, recenter, reset controls
+- Manual placement: log-scale sizing, yaw (plus pitch/roll), camera-relative
+  translation, all pivot-bracketed so they act in place
+- Collapsible control menu; two-finger gestures with a global on/off
+- Black or camera-passthrough background
 - File picker entry (will be replaced by Library integration)
 
 **Scope (future, in rough priority):**
-- Wire in MetalSplatter (immediate next step)
+- ~~Wire in MetalSplatter~~ — done
+- ~~Manual placement (scale / rotate / translate) + control menu + multi-touch~~ — done
+- ~~Passthrough mode (splat over camera feed)~~ — built; compositor verified in
+  the simulator against a test pattern, camera plumbing needs a device
 - Library integration (load from Library instead of file picker)
-- Passthrough mode (splat overlaid on camera feed)
+- **SOG and other compressed containers.** MetalSplatter has no reader for them
+  at any version, so this needs a decoder written from scratch (WebP planes plus
+  a container unzip). Currently recognized and rejected with a clear message.
+- Anchored placement (detect plane, tap to place) — INTEGRATION.md §5
 - Snapshot / screen recording from within the viewer
-- Multi-touch gestures (pinch to scale, two-finger drag to reposition splat)
 - Saved viewpoints / bookmarks within a splat
 - Use ARKit camera intrinsics for projection (already noted in INTEGRATION.md)
 
-**Dependencies:** Core, MetalSplatter (via SPM), ARKit, Metal
+**Dependencies:** Core, MetalSplatter 1.0.1 (via SPM), ARKit, Metal
 
-**Status:** Scaffold complete. Pending: MetalSplatter integration.
+**Status:** Rendering in the simulator, with manual placement (pivot-bracketed
+scale/rotate/translate), a collapsible control menu, two-finger gestures, and a
+camera-passthrough compositor — all exercised in the simulator.
+
+**Still unverified — needs a device.** ARKit doesn't run in the simulator, so
+`ARKitPoseProvider` compiles but has never produced a pose, and the passthrough
+path's camera plumbing (`CVMetalTextureCache` against the real capture pool,
+`displayTransform`) has never seen a real frame; only the compositor math is
+verified, against a synthetic test pattern. Loading a real PLY/SPZ/`.splat` file
+is also still untested — only the procedural sample has reached the renderer.
 
 ---
 
@@ -296,8 +318,9 @@ Reusable UI:
 
 Each step ends with something runnable and testable:
 
-1. **Wire MetalSplatter into Viewer.** Hardcode a sample PLY, see it
-   render. Scaffold → working viewer.
+1. ~~**Wire MetalSplatter into Viewer.**~~ **Done.** The sample scene is
+   generated procedurally rather than bundled as a PLY, to keep a large binary
+   out of the repo.
 2. **Library + Home (basic).** Replace the hardcoded splat with a real
    pick-from-library flow. App now feels like an app.
 3. **Settings (minimal).** Movement speed, default scale. Real preferences
@@ -333,11 +356,15 @@ to see where things stand.)
 
 - **Repo:** created, public, MIT licensed
 - **App Store name:** Lustre (reservation: TBD)
-- **Bundle ID:** TBD via Xcode project setup
-- **Xcode project:** TBD
-- **Viewer scaffold:** complete; MetalSplatter not yet integrated
+- **Bundle ID:** `com.alecborer.Lustre`
+- **Xcode project:** `Lustre.xcodeproj` at the repo root
+- **Minimum iOS:** 18.0 — forced by MetalSplatter, which has no version that
+  supports iOS 16 (1.0.x needs 18, the oldest tag needs 17)
+- **Viewer:** MetalSplatter integrated; renders in the simulator. AR path
+  unverified (needs a device).
 - **Other features:** planned, not started
-- **Hardware:** development on MacBook Air M4 16GB; iPhone target TBD
+- **Hardware:** development on MacBook Air M4 16GB; iPhone target TBD.
+  Note MetalSplatter `fatalError`s on x86_64, so an Intel Mac can't run this.
 
 ---
 
