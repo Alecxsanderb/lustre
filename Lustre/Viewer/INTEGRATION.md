@@ -138,7 +138,7 @@ toggle-off and on memory warning — ~24 MB at phone resolution. Depth is
 has never run, and if it touches depth across encoder boundaries a memoryless
 attachment would break in a way no simulator run reveals.
 
-## 4. No real-world occlusion — known v1 limitation
+## 4. Occlusion — planes built, full scene depth still out
 
 Splats are alpha-blended back-to-front. Confirmed from source:
 
@@ -151,11 +151,52 @@ what's absent is depth *testing*. The practical result is the same — splats dr
 over everything, including your hand and the walls — but it matters because the
 written depth is a usable signal later.
 
-**v1 behavior: splats render over everything. Not solving this now.** Real
-occlusion needs per-pixel scene depth from `ARFrame.sceneDepth`
-(LiDAR/`ARConfiguration.FrameSemantics.sceneDepth`) tested against splat depth,
-which is a Phase 3 LiDAR question and a hardware-gated feature. Document it in
-the UI as expected behavior rather than a bug.
+Full scene occlusion still needs per-pixel depth from `ARFrame.sceneDepth`
+(LiDAR / `ARConfiguration.FrameSemantics.sceneDepth`), which is a Phase 3
+hardware-gated question. **That is still not built.** What *is* built is the
+narrower case: occlusion against detected planes.
+
+### Built: plane occlusion in the composite pass
+
+Because the splat pass can't be depth-tested, occlusion happens *after* it, in
+screen space:
+
+1. Splats render offscreen to color + depth (the passthrough path already had
+   both; the depth texture just gained `.shaderRead`).
+2. `OccluderRenderer` rasterizes the detected planes into a second depth
+   texture — depth-only, no fragment function at all, real `.less` testing so
+   overlapping surfaces resolve to the nearest.
+3. The composite shader linearizes both depths to meters and fades the splat
+   out where it sits behind the surface.
+
+Linearizing matters: window depth is wildly non-linear at near 0.05 / far 100,
+so a tolerance expressed in depth units would be microscopic up close and
+metres away across the room. In meters, the 3 cm bias and 6 cm feather mean
+what they say — the bias absorbs plane-estimate error so a splat resting on a
+table doesn't flicker against the table's own plane.
+
+**The honest limitation.** With `highQualityDepth: false` the single-stage
+fragment shader emits no depth of its own, so the depth buffer holds the
+rasterizer's interpolated `z` for the *last* fragment written — and since the
+draw order is back-to-front, that's the **nearest splat quad** covering the
+pixel. One value stands in for a whole translucent column. Occlusion is
+therefore conservative: a pixel is hidden only when even its nearest splat is
+behind the surface, so splats further back in the same column stay visible and
+the silhouette erodes slightly. It never over-occludes. The fix would be
+`highQualityDepth: true`, whose multi-stage path computes a proper
+alpha-weighted mean depth (`MultiStageRenderPath.metal:87`) — but the library
+calls that path slower and it exists for Vision Pro reprojection, so it trades
+directly against the performance work. Not taken.
+
+Occlusion is off by default, requires the camera background (hiding splats
+behind a surface you can't see just deletes them), and turns plane detection on
+the same way the indicators do.
+
+`DetectedPlane` gained a `boundary` polygon for this: ARKit's
+`planeGeometry.boundaryVertices` is a convex hull that follows the actual
+table, whereas the bounding rectangle floats past its corners and would cut a
+hard rectangular hole out of the splat in mid-air. The gizmo outline uses the
+same polygon.
 
 ## 5. Placement and scale — the real design problem
 
@@ -242,6 +283,26 @@ where it lands, and plane outlines — a final `loadAction: .load` pass into the
 drawable, after splats and after the passthrough composite. No depth test: the
 indicators matter most when the splat is buried in geometry.
 
+### Built: the measuring ruler
+
+The axis bars carry notches at real-world intervals, which is the point: the
+splat's own units are arbitrary, so the only way to judge how big it actually
+is is to compare it against something that isn't. The bars are drawn along
+**world** axes in **world** metres — a ruler that inherited the splat's scale
+would measure nothing.
+
+`RulerScale.fitting(axisLength:units:)` picks the interval from a table of
+round numbers (metric down to 1 mm, imperial in inches/feet) so that an axis
+carries at most 12 minor ticks, with every *n*-th tick drawn longer so they can
+be counted without labels. Bar half-length comes from the splat's own footprint
+× scale, clamped to 0.15–2 m: a ruler fixed at 25 cm is useless against a room
+and swamps a figurine.
+
+The gizmo has no text renderer, so the menu names the interval ("Small notch
+25 cm · long notch 1 m") using the same `RulerScale` the shader geometry came
+from. That's the only place the marks get their units, so the two must not
+drift apart.
+
 **Original design sketch, mostly superseded:**
 
 ```
@@ -325,26 +386,71 @@ Constraints the visionOS path never has to think about:
 
 ---
 
-## Performance: what's actually available
+## Performance: built, and what's still out of reach
 
 Measured falloff starts around 500k splats. Two facts from the 1.0.1 source
-determine what can be done about it:
+bound what can be done about it:
 
 - **No early termination.** The fragment shaders have no transmittance cutoff
   or alpha-saturation break — only a "behind the camera" cull in
   `SplatProcessing.metal:159`. Every splat in view is rasterized and blended
   however occluded it is. The reference 3DGS rasterizer *does* early-out; this
   one doesn't. Adding it means editing package-resource shaders, i.e. vendoring
-  the dependency.
-- **No frustum culling anywhere.** But `setChunkEnabled(_:enabled:)` is public
-  (`SplatRenderer.swift:399`), so spatial chunking plus frustum/distance culling
-  is available **without** vendoring. That's the biggest win for a walk-through
-  viewer, where most of a scene is off-screen. Caveat to measure: chunk changes
-  invalidate the sort, so toggling must be hysteretic or it will thrash.
+  the dependency. Still not done.
+- **No frustum culling anywhere** — but `setChunkEnabled(_:enabled:)` is public
+  (`SplatRenderer.swift:399`), so it can be built on top. That is what shipped.
 
 **SOG does not help frame rate.** It's a storage format; the reader decodes to
 the same `SplatPoint` array, so per-frame cost is identical. It helps file size
 and load time only.
+
+### Built: chunking and frustum culling
+
+`SplatChunking` splits a load into a grid of chunks (~40k splats each, capped at
+128) via a counting sort, and `SplatChunkCuller` switches off the ones outside
+the frustum. `Frustum` extracts six planes from `projection × view` — where
+`view` is the full `pose × anchor × model` chain, so chunk bounds stay in the
+splat's own coordinates and survive rescaling and re-placement untouched.
+
+Two corrections to what this note previously claimed:
+
+- **`setChunkEnabled` does not invalidate the sort.** The library documents it
+  as sort-neutral: disabled chunks keep participating in sorting and the flag
+  takes effect through the GPU chunk table on the next `render()`. An earlier
+  version of this section said the opposite; it was wrong.
+- **Culling therefore saves rasterization, not sorting.** The CPU sort still
+  walks every splat in every chunk. That is the reason the quality budget
+  (`SplatQuality`) exists as a separate lever: dropping splats at load is the
+  only thing that makes the sort cheaper.
+
+The real reason culling has to be paced is different from the one first
+guessed. `setChunkEnabled` goes through `withChunkAccess`, which waits for
+in-flight renders to drain and sets `exclusiveAccessWaiters` while it waits —
+and `isReadyToRender` is false whenever that array is non-empty, so `draw(in:)`
+drops frames for as long as the request is pending. Toggling per frame would
+cost more than the culling saves. Hence: re-evaluate only after the camera has
+moved 3% of the scene diagonal or turned ~6°, never more than once per 0.3 s,
+and only issue a batch when the visible set actually changed. Measured in the
+simulator, that's **9 evaluations across 4,500 frames**.
+
+Verified in the simulator with the threshold temporarily lowered so the 12k
+sample splits into 8 chunks: the visible count tracked 8 → 6 → 0 → 2 as the
+splat was pushed out of the frustum and back, with the apply flag never stuck.
+At the shipping threshold the sample is a single chunk and the culler idles,
+which is why the menu hides the readout below two chunks.
+
+### Built: quality budget
+
+`SplatQuality` strides points out at load — Full / 1.2M / 500k. Applied at load
+rather than as a live control because the alternative is retaining the parsed
+`[SplatPoint]` so the budget can change without re-reading, and at 5M splats
+that second copy is hundreds of megabytes on a device with 2–4 GB usable.
+Changing it re-reads the file instead.
+
+Note that stride downsampling thins the cloud uniformly; it does not
+compensate by growing the surviving splats, so a heavily reduced scene looks
+sparser rather than softer. Weighting the keep-decision by splat scale would be
+the better version and is not built.
 
 Also note `useMultiStagePipeline` is `writeDepth && highQualityDepth`, and we
 pass `highQualityDepth: false` — so device and simulator now run the same
@@ -395,3 +501,17 @@ the full/video-range flag. The compositor *math* is verified in the simulator
 against `TestPatternCameraSource`; the camera plumbing feeding it is not. The procedural `SampleSplatScene` (~12k splats) is
 the only scene that has ever reached the renderer, and it says nothing about
 performance at the 1–5M splats real captures produce.
+
+Newly added, and unverified on hardware for the same reason:
+
+- **Plane occlusion against real planes.** The pass, the depth linearization
+  and the composite are verified in the simulator against the synthetic floor;
+  `ARPlaneAnchor.geometry.boundaryVertices` and the `center` offset applied to
+  it have never run.
+- **Whether culling actually raises frame rate.** The visible-set logic is
+  verified (8 → 6 → 0 → 2 chunks, correct enable/disable batching), but the
+  sample is 12k splats on a simulator — it demonstrates correctness, not
+  benefit. The benefit claim needs a real multi-million-splat capture on a
+  phone, and until then "splats off screen are skipped" is a statement about
+  what the code does, not about measured frames per second.
+- **Whether the ruler notches read at arm's length** against a real room.

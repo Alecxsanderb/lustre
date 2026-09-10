@@ -140,8 +140,13 @@ provider is active, so an AR-specific view had nothing left to do.
   translation, all pivot-bracketed so they act in place
 - Position indicators (axis bars, drop line, surface outlines), toggleable —
   and surface detection stops when they're off
+- Measuring notches on the axis bars at real-world intervals, metric or
+  imperial, with the menu naming the interval
+- Occlusion against detected planes (off by default, needs the camera
+  background)
 - Collapsible control menu; one-finger dolly plus two-finger gestures, with a
-  global on/off
+  global on/off and an optional lock to one axis at a time
+- Spatial chunking with frustum culling, plus a load-time splat budget
 - Black or camera-passthrough background
 - File picker entry (will be replaced by Library integration)
 
@@ -157,10 +162,18 @@ provider is active, so an AR-specific view had nothing left to do.
 - ~~Anchored placement (detect plane, tap to place)~~ — done; also the likely
   fix for splats drifting relative to the room
 - ~~Position indicators (axis bars, surface outlines)~~ — done
-- **Performance.** Falloff starts ~500k splats. Next lever is spatial chunking
-  plus frustum/distance culling via `setChunkEnabled`, which needs no fork.
-  Per-splat occlusion would require vendoring MetalSplatter to add a shader
-  early-out — deliberately not taken. See INTEGRATION.md "Performance".
+- ~~Measuring notches on the indicators~~ — done
+- ~~Occlusion against detected planes~~ — done; conservative (one depth sample
+  per pixel stands in for a translucent column), off by default
+- ~~Spatial chunking + frustum culling via `setChunkEnabled`, no fork~~ — done;
+  visible-set logic verified in the simulator, **frame-rate benefit not yet
+  measured on a real capture**
+- **Performance, what's left.** Culling saves rasterization but not the CPU
+  sort, which still walks every splat — the quality budget is the only lever on
+  that, and it downsamples uniformly rather than by splat size. A shader
+  early-out (real per-splat occlusion) still needs vendoring MetalSplatter, and
+  better plane occlusion needs `highQualityDepth: true`, which is itself slower.
+  See INTEGRATION.md "Performance".
 - Snapshot / screen recording from within the viewer
 - Saved viewpoints / bookmarks within a splat
 - Use ARKit camera intrinsics for projection (already noted in INTEGRATION.md)
@@ -168,8 +181,10 @@ provider is active, so an AR-specific view had nothing left to do.
 **Dependencies:** Core, MetalSplatter 1.0.1 (via SPM), ARKit, Metal
 
 **Status:** Rendering in the simulator, with manual placement (pivot-bracketed
-scale/rotate/translate), a collapsible control menu, two-finger gestures, and a
-camera-passthrough compositor — all exercised in the simulator.
+scale/rotate/translate), anchored tap-to-place, a collapsible control menu,
+gestures with optional axis lock, a measuring ruler on the indicators, plane
+occlusion, chunk culling, and a camera-passthrough compositor — all exercised
+in the simulator.
 
 **Still unverified — needs a device.** ARKit doesn't run in the simulator, so
 `ARKitPoseProvider` compiles but has never produced a pose, and the passthrough

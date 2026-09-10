@@ -28,6 +28,7 @@ struct ViewerScreen: View {
             SplatGestureLayer(sceneState: model.sceneState,
                               isEnabled: model.uiState.areGesturesEnabled
                                   && !model.sceneState.loadState.isLoading,
+                              locksToSingleAxis: model.uiState.locksToSingleAxis,
                               cameraTransform: { model.cameraTransform })
                 .ignoresSafeArea()
 
@@ -52,10 +53,19 @@ struct ViewerScreen: View {
                                 statusMessage: model.statusMessage,
                                 isPassthroughAvailable: model.isPassthroughAvailable,
                                 isPlacementAvailable: model.isPlacementAvailable,
+                                isOcclusionAvailable: model.isOcclusionAvailable,
+                                rulerDescription: model.rulerDescription,
+                                cullingSummary: model.cullingSummary,
                                 onRecenter: model.recenter,
                                 onBackgroundChange: model.setBackground,
                                 onReplace: model.beginPlacement,
-                                onIndicatorsChange: model.setIndicatorsEnabled)
+                                onIndicatorsChange: model.setIndicatorsEnabled,
+                                onMeasuringTicksChange: model.setMeasuringTicksEnabled,
+                                onRulerUnitsChange: model.setRulerUnits,
+                                onOcclusionChange: model.setOcclusionEnabled,
+                                onQualityChange: { quality in
+                                    Task { await model.setQuality(quality) }
+                                })
                         .padding(.bottom, 8)
                 }
             }

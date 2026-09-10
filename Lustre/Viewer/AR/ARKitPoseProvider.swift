@@ -316,9 +316,17 @@ extension ARKitPoseProvider: SurfaceProvider {
             // planeExtent is in the anchor's local space, centered on `center`.
             var transform = plane.transform
             transform.columns.3 += simd_float4(plane.center.x, plane.center.y, plane.center.z, 0)
+            // Boundary vertices are relative to the anchor's own origin, so
+            // they need the same `center` shift removed to line up with the
+            // transform above. Without this the outline sits offset from the
+            // plane it describes, and the occluder mesh with it.
+            let boundary = plane.geometry.boundaryVertices.map {
+                SIMD2<Float>($0.x - plane.center.x, $0.z - plane.center.z)
+            }
             return DetectedPlane(id: plane.identifier,
                                  transform: transform,
-                                 extent: SIMD2(plane.planeExtent.width, plane.planeExtent.height))
+                                 extent: SIMD2(plane.planeExtent.width, plane.planeExtent.height),
+                                 boundary: boundary)
         }
     }
 

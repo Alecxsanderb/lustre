@@ -2,9 +2,9 @@
 //  GizmoRenderer.swift
 //  Lustre
 //
-//  Draws the placement indicators: axis bars at the splat's center, a drop
-//  line to the surface beneath it, a ring where that line lands, and outlines
-//  of detected planes.
+//  Draws the placement indicators: axis bars at the splat's center with
+//  real-world measuring notches, a drop line to the surface beneath it, a ring
+//  where that line lands, and outlines of detected planes.
 //
 //  Runs as a final pass into the drawable, after splats (and after the
 //  passthrough composite), with `loadAction = .load` so it draws over whatever
@@ -29,21 +29,21 @@ final class GizmoRenderer {
     }
 
     private enum Constants {
-        /// Axis bar half-length, meters. Fixed rather than proportional to the
-        /// splat: it's a position indicator, not a scale readout, and a
-        /// gizmo that grows with a 100× splat would fill the screen.
-        static let axisLength: Float = 0.25
-        static let ringRadius: Float = 0.12
         static let ringSegments = 32
         /// Above this the drop line is drawn dashed rather than solid, as a
         /// hint the splat is floating a long way off the surface.
         static let longDropDistance: Float = 3.0
         static let maximumVertices = 4096
+        /// Notch half-length as a fraction of the tick interval, so the marks
+        /// stay proportioned however coarse the ruler gets.
+        static let minorTickFraction: Float = 0.18
+        static let majorTickFraction: Float = 0.42
     }
 
     private let device: MTLDevice
     private let pipelineState: MTLRenderPipelineState
-    private var vertexBuffer: MTLBuffer?
+    private var vertexBuffers: [MTLBuffer] = []
+    private var bufferIndex = 0
     private var vertices: [Vertex] = []
 
     init?(device: MTLDevice, colorFormat: MTLPixelFormat) {
@@ -81,17 +81,27 @@ final class GizmoRenderer {
 
     /// - Parameters:
     ///   - splatCenter: the splat's pivot in world space.
+    ///   - axisLength: half-length of each bar, in **meters of real space**.
+    ///     Sized from the splat so the ruler spans something comparable to what
+    ///     you're looking at.
+    ///   - ruler: notch spacing, or nil to draw plain bars.
     ///   - planes: detected surfaces; empty when detection is off.
     ///   - viewProjection: projection × view. **Not** including the model
     ///     matrix — the gizmo is authored directly in world space.
     func draw(splatCenter: SIMD3<Float>,
+              axisLength: Float,
+              ruler: RulerScale?,
               planes: [DetectedPlane],
               isPlacing: Bool,
               viewProjection: simd_float4x4,
               into target: MTLTexture,
               commandBuffer: MTLCommandBuffer) {
-        buildGeometry(splatCenter: splatCenter, planes: planes, isPlacing: isPlacing)
-        guard !vertices.isEmpty, let buffer = updatedVertexBuffer() else { return }
+        buildGeometry(splatCenter: splatCenter,
+                      axisLength: axisLength,
+                      ruler: ruler,
+                      planes: planes,
+                      isPlacing: isPlacing)
+        guard !vertices.isEmpty, let buffer = nextVertexBuffer() else { return }
 
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = target
@@ -114,21 +124,36 @@ final class GizmoRenderer {
     // MARK: - Geometry
 
     private func buildGeometry(splatCenter: SIMD3<Float>,
+                               axisLength: Float,
+                               ruler: RulerScale?,
                                planes: [DetectedPlane],
                                isPlacing: Bool) {
         vertices.removeAll(keepingCapacity: true)
 
         // Axis bars. Red/green/blue for X/Y/Z, the near-universal convention.
+        // They're drawn in world space along world axes, not the splat's own —
+        // the point is to measure the room, and a ruler that inherits the
+        // splat's arbitrary scale measures nothing.
         let alpha: Float = isPlacing ? 1.0 : 0.85
-        addLine(from: splatCenter - SIMD3(Constants.axisLength, 0, 0),
-                to: splatCenter + SIMD3(Constants.axisLength, 0, 0),
-                color: SIMD4(1.0, 0.25, 0.25, alpha))
-        addLine(from: splatCenter - SIMD3(0, Constants.axisLength, 0),
-                to: splatCenter + SIMD3(0, Constants.axisLength, 0),
-                color: SIMD4(0.3, 1.0, 0.35, alpha))
-        addLine(from: splatCenter - SIMD3(0, 0, Constants.axisLength),
-                to: splatCenter + SIMD3(0, 0, Constants.axisLength),
-                color: SIMD4(0.35, 0.55, 1.0, alpha))
+        let length = max(axisLength, 1e-3)
+        let axes: [(direction: SIMD3<Float>, tick: SIMD3<Float>, color: SIMD4<Float>)] = [
+            (SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD4(1.0, 0.25, 0.25, alpha)),
+            (SIMD3(0, 1, 0), SIMD3(1, 0, 0), SIMD4(0.3, 1.0, 0.35, alpha)),
+            (SIMD3(0, 0, 1), SIMD3(0, 1, 0), SIMD4(0.35, 0.55, 1.0, alpha)),
+        ]
+        for axis in axes {
+            addLine(from: splatCenter - axis.direction * length,
+                    to: splatCenter + axis.direction * length,
+                    color: axis.color)
+            if let ruler {
+                addTicks(center: splatCenter,
+                         direction: axis.direction,
+                         tickDirection: axis.tick,
+                         length: length,
+                         ruler: ruler,
+                         color: axis.color)
+            }
+        }
 
         // Drop line to the surface directly below the splat, plus a ring where
         // it lands — this is what makes the height readable.
@@ -142,7 +167,7 @@ final class GizmoRenderer {
             } else {
                 addLine(from: splatCenter, to: foot, color: color)
             }
-            addRing(center: foot, radius: Constants.ringRadius, color: color)
+            addRing(center: foot, radius: length * 0.5, color: color)
         }
 
         // Outlines of every detected plane, so it's obvious what the app has
@@ -159,6 +184,37 @@ final class GizmoRenderer {
             .map { $0.transform.columns.3.y }
             .filter { $0 < point.y }
             .max()
+    }
+
+    /// Notches at fixed real-world intervals, every `majorEvery`-th one longer.
+    ///
+    /// This is the whole point of the ruler: the splat's units are arbitrary,
+    /// but these marks are meters, so stepping sideways and watching how many
+    /// notches go by tells you how big the splat actually is.
+    private func addTicks(center: SIMD3<Float>,
+                          direction: SIMD3<Float>,
+                          tickDirection: SIMD3<Float>,
+                          length: Float,
+                          ruler: RulerScale,
+                          color: SIMD4<Float>) {
+        guard ruler.spacing > 0, ruler.spacing.isFinite else { return }
+        let count = Int(length / ruler.spacing)
+        guard count > 0 else { return }
+
+        // Cap the notch size so a coarse ruler doesn't sprout marks longer than
+        // the bar they sit on.
+        let maximumTick = length * 0.2
+        let minor = min(ruler.spacing * Constants.minorTickFraction, maximumTick)
+        let major = min(ruler.spacing * Constants.majorTickFraction, maximumTick)
+
+        for step in 1...count {
+            let isMajor = ruler.majorEvery > 0 && step % ruler.majorEvery == 0
+            let half = tickDirection * (isMajor ? major : minor)
+            let offset = direction * (Float(step) * ruler.spacing)
+            for side in [offset, -offset] {
+                addLine(from: center + side - half, to: center + side + half, color: color)
+            }
+        }
     }
 
     private func addLine(from start: SIMD3<Float>, to end: SIMD3<Float>, color: SIMD4<Float>) {
@@ -188,17 +244,14 @@ final class GizmoRenderer {
         }
     }
 
+    /// Traces the plane's real outline where ARKit supplied one, falling back to
+    /// its bounding rectangle. The two look very different in a room: the hull
+    /// follows the table, the rectangle floats past its corners.
     private func addPlaneOutline(_ plane: DetectedPlane, color: SIMD4<Float>) {
-        let halfWidth = plane.extent.x / 2
-        let halfDepth = plane.extent.y / 2
-        let corners = [
-            SIMD3<Float>(-halfWidth, 0, -halfDepth),
-            SIMD3<Float>( halfWidth, 0, -halfDepth),
-            SIMD3<Float>( halfWidth, 0,  halfDepth),
-            SIMD3<Float>(-halfWidth, 0,  halfDepth),
-        ].map { corner -> SIMD3<Float> in
-            (plane.transform * SIMD4<Float>(corner, 1)).xyz
+        let corners = plane.outline.map { local -> SIMD3<Float> in
+            (plane.transform * SIMD4<Float>(local.x, 0, local.y, 1)).xyz
         }
+        guard corners.count >= 3 else { return }
         for i in corners.indices {
             addLine(from: corners[i], to: corners[(i + 1) % corners.count], color: color)
         }
@@ -208,16 +261,32 @@ final class GizmoRenderer {
         a + (b - a) * t
     }
 
-    private func updatedVertexBuffer() -> MTLBuffer? {
-        let length = MemoryLayout<Vertex>.stride * Constants.maximumVertices
-        if vertexBuffer == nil {
-            vertexBuffer = device.makeBuffer(length: length, options: .storageModeShared)
-            vertexBuffer?.label = "Gizmo vertices"
+    /// One buffer per in-flight frame.
+    ///
+    /// A single shared buffer is a CPU/GPU race: `draw(in:)` allows up to
+    /// `SplatRenderer.framesInFlight` command buffers outstanding, and Metal's
+    /// hazard tracking doesn't stop the CPU from overwriting a `.storageModeShared`
+    /// buffer that an earlier frame's GPU work is still reading. Cycling means a
+    /// buffer is only rewritten once the frame that used it has completed.
+    private func nextVertexBuffer() -> MTLBuffer? {
+        if vertexBuffers.isEmpty {
+            let length = MemoryLayout<Vertex>.stride * Constants.maximumVertices
+            vertexBuffers = (0..<SplatRenderer.framesInFlight).compactMap { index in
+                let buffer = device.makeBuffer(length: length, options: .storageModeShared)
+                buffer?.label = "Gizmo vertices \(index)"
+                return buffer
+            }
+            guard vertexBuffers.count == SplatRenderer.framesInFlight else {
+                vertexBuffers.removeAll()
+                return nil
+            }
         }
-        guard let vertexBuffer else { return nil }
+
+        bufferIndex = (bufferIndex + 1) % vertexBuffers.count
+        let buffer = vertexBuffers[bufferIndex]
         vertices.withUnsafeBytes { source in
-            vertexBuffer.contents().copyMemory(from: source.baseAddress!, byteCount: source.count)
+            buffer.contents().copyMemory(from: source.baseAddress!, byteCount: source.count)
         }
-        return vertexBuffer
+        return buffer
     }
 }

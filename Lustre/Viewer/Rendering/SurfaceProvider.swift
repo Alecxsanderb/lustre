@@ -20,6 +20,25 @@ struct DetectedPlane: Equatable, Identifiable {
     var transform: simd_float4x4
     /// Width and depth in meters, in the plane's own axes.
     var extent: SIMD2<Float>
+
+    /// Convex outline in the plane's local XZ, relative to `transform`.
+    ///
+    /// Empty means "no better information than the extent", and callers fall
+    /// back to the rectangle. It matters for occlusion: a real table masked by
+    /// its bounding rectangle cuts a hard rectangular hole out of the splat in
+    /// mid-air, which reads as a bug rather than as a table.
+    var boundary: [SIMD2<Float>] = []
+
+    /// The outline to draw or rasterize, in the plane's local XZ.
+    var outline: [SIMD2<Float>] {
+        guard boundary.count >= 3 else {
+            let halfWidth = extent.x / 2
+            let halfDepth = extent.y / 2
+            return [SIMD2(-halfWidth, -halfDepth), SIMD2(halfWidth, -halfDepth),
+                    SIMD2(halfWidth, halfDepth), SIMD2(-halfWidth, halfDepth)]
+        }
+        return boundary
+    }
 }
 
 /// Where the splat would land if placed right now.

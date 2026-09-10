@@ -24,6 +24,15 @@ final class ViewerModel {
         let bounds: SplatBounds?
     }
 
+    /// What to re-read when the quality budget changes. The parsed points
+    /// aren't retained — a second copy of a multi-million-point capture is the
+    /// one allocation an iPhone can't spare — so re-reading is the only way
+    /// back to a different budget.
+    private enum LoadSource {
+        case sample
+        case file(URL)
+    }
+
     let sceneState = SplatSceneState()
     let uiState = ViewerUIState()
     let poseProvider: any PoseProvider
@@ -45,6 +54,13 @@ final class ViewerModel {
     private var surfaceProvider: (any SurfaceProvider)?
 
     private var memoryWarningObserver: (any NSObjectProtocol)?
+    private var lastLoadSource: LoadSource?
+
+    /// Guards against overlapping loads. The UI already disables the import
+    /// button and the quality picker while loading, but two concurrent loads
+    /// would interleave `removeAllChunks` and `addChunk` on the same renderer,
+    /// so this doesn't rely on the view layer getting it right.
+    private var isLoading = false
 
     init() {
         // Device first: `ARKitPoseProvider` needs it for its texture cache.
@@ -70,7 +86,7 @@ final class ViewerModel {
         renderer.anchorTransformSource = { [weak self] in
             self?.currentAnchorTransform ?? matrix_identity_float4x4
         }
-        renderer.gizmoStateSource = { [weak self] in
+        renderer.surfaceStateSource = { [weak self] in
             guard let self else { return nil }
             return (planes: surfaceProvider?.detectedPlanes ?? [],
                     isPlacing: sceneState.placementState == .awaitingSurface)
@@ -97,8 +113,9 @@ final class ViewerModel {
         }
         #if targetEnvironment(simulator)
         // Synthetic frames so the composite path — premultiplied alpha, sRGB
-        // linearization, UV transform — is exercisable without a camera.
-        // Everything except the ARKit plumbing gets verified here.
+        // linearization, UV transform, and now the occlusion depth compare —
+        // is exercisable without a camera. Everything except the ARKit
+        // plumbing gets verified here.
         let pattern = TestPatternCameraSource(device: device)
         testPatternSource = pattern
         renderer.setCameraFrameSource(pattern)
@@ -114,10 +131,32 @@ final class ViewerModel {
 
     var isPlacementAvailable: Bool { surfaceProvider != nil }
 
+    /// Occlusion needs both halves: surfaces to occlude with, and a camera
+    /// image to reveal underneath. Without the camera it would just delete
+    /// splats against black.
+    var isOcclusionAvailable: Bool { isPlacementAvailable && isPassthroughAvailable }
+
+    /// Chunks drawn vs. total, or nil when the splat is a single chunk and
+    /// there's nothing to report.
+    var cullingSummary: (visibleChunks: Int, totalChunks: Int, visibleSplats: Int)? {
+        guard sceneState.chunkCount > 1 else { return nil }
+        return (sceneState.visibleChunkCount, sceneState.chunkCount, sceneState.visibleSplatCount)
+    }
+
+
     /// What the placement UI shows while awaiting a surface.
     var placementCandidate: PlacementCandidate? { surfaceProvider?.placementCandidate }
 
     var isAwaitingPlacement: Bool { sceneState.placementState == .awaitingSurface }
+
+    /// Interval one small notch on the axis bars represents, for the menu —
+    /// the gizmo draws no text, so this is the only place the marks get named.
+    var rulerDescription: (minor: String, major: String)? {
+        guard uiState.showsPlacementIndicators, uiState.showsMeasuringTicks else { return nil }
+        let ruler = RulerScale.fitting(axisLength: sceneState.indicatorAxisLength,
+                                       units: uiState.rulerUnits)
+        return (ruler.minorTickDescription, ruler.majorTickDescription)
+    }
 
     /// The splat's world anchor for this frame.
     ///
@@ -161,24 +200,58 @@ final class ViewerModel {
         syncSurfaceDetection()
     }
 
+    // MARK: - Indicators and occlusion
+
     func setIndicatorsEnabled(_ enabled: Bool) {
         uiState.showsPlacementIndicators = enabled
         renderer?.setIndicatorsEnabled(enabled)
+        syncIndicatorStyle()
         syncSurfaceDetection()
     }
 
-    /// Surface detection runs only when something needs it — the indicators or
-    /// an active placement. It costs CPU every frame otherwise.
+    func setMeasuringTicksEnabled(_ enabled: Bool) {
+        uiState.showsMeasuringTicks = enabled
+        syncIndicatorStyle()
+    }
+
+    func setRulerUnits(_ units: RulerUnits) {
+        uiState.rulerUnits = units
+        syncIndicatorStyle()
+    }
+
+    func setOcclusionEnabled(_ enabled: Bool) {
+        uiState.occludesBehindSurfaces = enabled
+        applyOcclusionSetting()
+        syncSurfaceDetection()
+    }
+
+    private func syncIndicatorStyle() {
+        renderer?.rulerUnits = uiState.showsMeasuringTicks ? uiState.rulerUnits : nil
+    }
+
+    /// Occlusion is only armed when the camera background is actually showing.
+    private func applyOcclusionSetting() {
+        renderer?.setOcclusionEnabled(uiState.occludesBehindSurfaces && uiState.background == .camera)
+    }
+
+    /// Surface detection runs only when something needs it — the indicators, an
+    /// active placement, or occlusion. It costs CPU every frame otherwise.
     private func syncSurfaceDetection() {
+        let occlusionNeedsSurfaces = uiState.occludesBehindSurfaces && uiState.background == .camera
         surfaceProvider?.isSurfaceDetectionEnabled =
-            uiState.showsPlacementIndicators || sceneState.placementState == .awaitingSurface
+            uiState.showsPlacementIndicators
+            || sceneState.placementState == .awaitingSurface
+            || occlusionNeedsSurfaces
     }
 
     func onAppear() {
         poseProvider.start()
         observeMemoryWarnings()
-        // Apply the default background; nothing has pushed it to the renderer yet.
+        // Apply the defaults; nothing has pushed them to the renderer yet.
         renderer?.setPassthroughEnabled(uiState.background == .camera)
+        applyOcclusionSetting()
+        syncIndicatorStyle()
+        syncSurfaceDetection()
     }
 
     func onDisappear() {
@@ -198,6 +271,8 @@ final class ViewerModel {
     func setBackground(_ background: ViewerUIState.Background) {
         uiState.background = background
         renderer?.setPassthroughEnabled(background == .camera)
+        applyOcclusionSetting()
+        syncSurfaceDetection()
     }
 
     /// The offscreen passthrough targets are the largest allocation we can hand
@@ -218,6 +293,7 @@ final class ViewerModel {
     // MARK: - Loading
 
     func loadSample() async {
+        lastLoadSource = .sample
         // Authored Y-up in our own coordinates at a deliberate origin and in
         // real meters, so it skips the flip, the pivot, and the auto-fit that
         // real 3DGS captures all need.
@@ -227,6 +303,7 @@ final class ViewerModel {
     }
 
     func load(url: URL) async {
+        lastLoadSource = .file(url)
         // SfM output: arbitrary frame, arbitrary origin, arbitrary scale, so
         // every correction applies.
         await load(name: url.lastPathComponent, appliesUpCalibration: true, hasAuthoredPlacement: false) {
@@ -234,13 +311,28 @@ final class ViewerModel {
         }
     }
 
+    /// Re-reads the current splat. The only way to change the quality budget,
+    /// since the parsed points aren't kept.
+    func setQuality(_ quality: SplatQuality) async {
+        guard quality != uiState.quality else { return }
+        uiState.quality = quality
+        switch lastLoadSource {
+        case .sample: await loadSample()
+        case .file(let url): await load(url: url)
+        case nil: break
+        }
+    }
+
     private func load(name: String,
                       appliesUpCalibration: Bool,
                       hasAuthoredPlacement: Bool,
                       producePoints: @escaping @Sendable () async throws -> [SplatPoint]) async {
-        guard let renderer else { return }
+        guard let renderer, !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
 
         sceneState.loadState = .loading(name)
+        let quality = uiState.quality
         do {
             // Off the main actor: generating the sample room, parsing a
             // multi-megabyte PLY, and the bounds pass are all long enough to
@@ -253,11 +345,15 @@ final class ViewerModel {
                 return LoadedScene(points: points, bounds: bounds)
             }.value
 
-            try await renderer.load(points: scene.points)
+            let sourceCount = scene.points.count
+            let loadedCount = try await renderer.load(points: scene.points,
+                                                      bounds: scene.bounds,
+                                                      quality: quality)
             applyPlacement(for: scene.bounds,
                            appliesUpCalibration: appliesUpCalibration,
                            hasAuthoredPlacement: hasAuthoredPlacement)
-            sceneState.loadState = .loaded(name: name, splatCount: scene.points.count)
+            sceneState.sourceSplatCount = loadedCount < sourceCount ? sourceCount : nil
+            sceneState.loadState = .loaded(name: name, splatCount: loadedCount)
             // Ask the user where it goes rather than dropping it on their face.
             beginPlacement()
         } catch {
@@ -269,6 +365,8 @@ final class ViewerModel {
                                 appliesUpCalibration: Bool,
                                 hasAuthoredPlacement: Bool) {
         sceneState.appliesUpCalibration = appliesUpCalibration
+        // Drives the length of the measuring axes, so it's set either way.
+        sceneState.assetExtent = bounds?.extent ?? .zero
 
         if hasAuthoredPlacement {
             // The author already chose the origin and the units — re-centering

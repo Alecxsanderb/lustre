@@ -67,8 +67,20 @@ passthrough renders splats offscreen and composites in a second pass. See
 **No depth testing.** `depthCompareFunction = .always` on every pipeline
 variant. Depth is written (`writeDepth = depthFormat != .invalid`) but never
 tested, so splats draw over everything and real-world occlusion does not come
-for free. See the design note — that's a documented v1 limitation, not a bug to
-fix.
+for free.
+
+What the written depth actually contains depends on `highQualityDepth`:
+
+- `false` (what Lustre passes): the single-stage fragment shader emits no depth,
+  so the buffer holds the rasterizer's interpolated `z` of the *last* fragment
+  written — with back-to-front order, the **nearest splat quad**. Usable as a
+  conservative occlusion signal, which is what `PassthroughCompositor` does, but
+  it's one sample standing in for a translucent column.
+- `true`: the multi-stage path computes an alpha-weighted mean depth
+  (`MultiStageRenderPath.metal`), which is what you'd actually want for
+  occlusion — and is slower, and exists for Vision Pro reprojection.
+
+Full scene occlusion still needs `ARFrame.sceneDepth`; that's Phase 3.
 
 ## Key APIs
 
@@ -103,6 +115,25 @@ convention isn't universal and some files need the opposite.
 
 The procedural sample is ~12k splats and tells you nothing about real
 performance. Actual captures are 1–5M splats, which is where sort cost and
-memory pressure appear. `readAll()` blocks on the whole file; large captures
-should stream in as multiple chunks. Parse off the main actor — a multi-megabyte
-PLY on the main thread drops frames.
+memory pressure appear. `readAll()` blocks on the whole file. Parse off the
+main actor — a multi-megabyte PLY on the main thread drops frames.
+
+### Chunk culling — the two things that surprise people
+
+`setChunkEnabled(_:enabled:)` is public and **sort-neutral**: the library's own
+comment says disabled chunks keep participating in sorting and the flag takes
+effect through the GPU chunk table on the next `render()`. So:
+
+- Culling saves **rasterization only**. The CPU sort still walks every splat in
+  every chunk. Fewer splats on screen does not make the sort cheaper — only
+  loading fewer splats does (`SplatQuality`).
+- The reason to pace toggling is **not** sort invalidation. It's that
+  `setChunkEnabled` goes through `withChunkAccess`, which waits for in-flight
+  renders to drain and makes `isReadyToRender` false while it waits — so
+  `draw(in:)` drops frames for as long as a request is pending. `SplatChunkCuller`
+  therefore re-evaluates only after real camera movement and batches every
+  change into one `withChunkAccess` (it's reentrant, so nested
+  `setChunkEnabled` calls are free).
+
+There is still **no early-out in the fragment shaders** — no transmittance
+cutoff, only a behind-camera cull. Adding one means vendoring the package.

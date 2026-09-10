@@ -83,7 +83,19 @@ ARKit refines its map and the transform doesn't follow. Re-read
 `anchorTransform(for:)` every frame. Re-running the session to change plane
 detection must omit `.resetTracking`, or placed anchors are lost.
 
-Plane detection is enabled only while placing or while indicators are on.
+Plane detection is enabled only while placing, while indicators are on, or
+while plane occlusion is on.
+
+### Plane geometry, not just extent
+
+`ARPlaneAnchor` gives both `planeExtent` (a bounding rectangle) and
+`geometry.boundaryVertices` (a convex hull that follows the actual surface).
+Use the hull wherever the plane is drawn or rasterized — masked by its
+rectangle, a real table cuts a hard rectangular hole out of the splat in
+mid-air. Boundary vertices are relative to the anchor's own origin, so the
+`plane.center` offset that `refreshPlanes` folds into the transform has to come
+back out of the vertices, or the outline sits skewed from the plane it
+describes.
 
 ### Historical note
 

@@ -10,6 +10,9 @@
 //  `SplatRenderer` in this app means *this* type; the library's is always
 //  written out as `MetalSplatter.SplatRenderer`.
 //
+//  Frame order: splats (offscreen when compositing) → occluder depth →
+//  camera composite → indicators, straight into the drawable.
+//
 
 import Foundation
 import Metal
@@ -25,8 +28,13 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Lustre",
                                     category: "SplatRenderer")
 
+    /// Command buffers that may be outstanding at once. Anything writing
+    /// CPU-visible buffers per frame needs this many copies, or it will
+    /// overwrite data an earlier frame's GPU work is still reading.
+    static let framesInFlight = 3
+
     private enum Constants {
-        static let maxSimultaneousRenders = 3
+        static let maxSimultaneousRenders = SplatRenderer.framesInFlight
         static let nearZ: Float = 0.05
         static let farZ: Float = 100.0
         static let colorFormat = MTLPixelFormat.bgra8Unorm_srgb
@@ -45,11 +53,35 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     private let sceneState: SplatSceneState
     private var poseProvider: any PoseProvider
 
+    // MARK: - Culling
+
+    private let culler = SplatChunkCuller()
+
+    /// Copies the culler's counters into `SplatSceneState`, which is what the
+    /// menu observes. Only on change: these are `@Observable` properties, and
+    /// writing them every frame would re-render the viewer at display rate.
+    private func publishCullingSummary() {
+        let total = culler.isActive ? culler.chunkCount : 0
+        guard sceneState.chunkCount != total
+                || sceneState.visibleChunkCount != culler.visibleChunkCount
+                || sceneState.visibleSplatCount != culler.visibleSplatCount
+        else { return }
+        sceneState.chunkCount = total
+        sceneState.visibleChunkCount = culler.visibleChunkCount
+        sceneState.visibleSplatCount = culler.visibleSplatCount
+    }
+
+
     // MARK: - Passthrough
 
     private var isPassthroughEnabled = false
     private weak var cameraFrameSource: (any CameraFrameSource)?
     private var compositor: PassthroughCompositor?
+
+    // MARK: - Occlusion
+
+    private var isOcclusionEnabled = false
+    private var occluderRenderer: OccluderRenderer?
 
     // MARK: - Placement
 
@@ -57,9 +89,12 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     /// which holds the placement policy; the renderer only multiplies it in.
     var anchorTransformSource: (() -> simd_float4x4)?
 
-    /// Supplies indicator geometry each frame. Nil disables the gizmo pass
-    /// entirely, including its allocations.
-    var gizmoStateSource: (() -> (planes: [DetectedPlane], isPlacing: Bool)?)?
+    /// Supplies detected surfaces each frame, for both the indicators and the
+    /// occlusion pass. Nil disables the indicator pass entirely.
+    var surfaceStateSource: (() -> (planes: [DetectedPlane], isPlacing: Bool)?)?
+
+    /// Units for the measuring notches, or nil for plain axis bars.
+    var rulerUnits: RulerUnits?
 
     private var gizmoRenderer: GizmoRenderer?
 
@@ -111,6 +146,20 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// Occlusion only means anything over the camera: hiding splats behind a
+    /// surface you can't see just deletes them.
+    func setOcclusionEnabled(_ enabled: Bool) {
+        guard enabled != isOcclusionEnabled else { return }
+        isOcclusionEnabled = enabled
+        if enabled {
+            if occluderRenderer == nil {
+                occluderRenderer = OccluderRenderer(device: device, depthFormat: Constants.depthFormat)
+            }
+        } else {
+            occluderRenderer = nil
+        }
+    }
+
     /// Drops the discretionary GPU memory. Called on a memory warning, where a
     /// multi-hundred-megabyte splat is usually the real problem but this is the
     /// part we can give back immediately.
@@ -131,17 +180,56 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     // MARK: - Loading
 
     /// Replaces the current scene. Parsing already happened off-actor in
-    /// `SplatFileIO`; this is the GPU-side upload.
-    func load(points: [SplatPoint]) async throws {
+    /// `SplatFileIO`; this partitions and uploads.
+    ///
+    /// - Returns: how many splats were actually loaded, which is below
+    ///   `points.count` whenever the quality budget strided some out.
+    @discardableResult
+    func load(points: [SplatPoint], bounds: SplatBounds?, quality: SplatQuality) async throws -> Int {
         let renderer = try existingOrNewRenderer()
         await renderer.removeAllChunks()
-        let chunk = try SplatChunk(device: device, from: points)
-        await renderer.addChunk(chunk)
+        culler.removeAll()
+
+        // Partitioning walks every point and encodes each one into a Metal
+        // buffer — far too much for the main actor on a multi-million-splat
+        // capture. `SplatChunk` is Sendable, so the whole thing can happen off
+        // it and only the handles come back.
+        let device = self.device
+        let built = try await Task.detached(priority: .userInitiated) {
+            try SplatChunking.build(points: points,
+                                    bounds: bounds,
+                                    budget: quality.budget,
+                                    device: device)
+        }.value
+
+        // One `withChunkAccess` for all of them. Each `addChunk` otherwise takes
+        // exclusive access on its own, and taking it drains the render queue and
+        // blocks new frames — 128 of those back to back is a visible stall, and
+        // a reload can happen at runtime when the quality picker changes.
+        let (entries, loaded) = await renderer.withChunkAccess {
+            () -> ([SplatChunkCuller.Entry], Int) in
+            var entries: [SplatChunkCuller.Entry] = []
+            entries.reserveCapacity(built.count)
+            var loaded = 0
+            for item in built {
+                let id = await renderer.addChunk(item.chunk)
+                entries.append(SplatChunkCuller.Entry(id: id,
+                                                      minimum: item.minimum,
+                                                      maximum: item.maximum,
+                                                      splatCount: item.chunk.splatCount))
+                loaded += item.chunk.splatCount
+            }
+            return (entries, loaded)
+        }
+        culler.reset(entries: entries)
         splatRenderer = renderer
+        Self.log.info("Loaded \(loaded) splats in \(built.count) chunk(s)")
+        return loaded
     }
 
     func unload() async {
         await splatRenderer?.removeAllChunks()
+        culler.removeAll()
     }
 
     /// The library renderer is expensive to build and its pixel formats are
@@ -177,7 +265,16 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         guard drawableSize.width > 0, drawableSize.height > 0 else { return }
         guard let drawable = view.currentDrawable else { return }
 
-        let cameraFrame = currentPassthroughFrame()
+        let projectionMatrix = currentProjection()
+        let viewMatrix = currentViewMatrix()
+        culler.update(viewMatrix: viewMatrix,
+                      projectionMatrix: projectionMatrix,
+                      renderer: splatRenderer)
+        publishCullingSummary()
+
+        let surfaces = surfaceStateSource?()
+        let occludingPlanes = isOcclusionEnabled ? (surfaces?.planes ?? []) : []
+        let cameraFrame = currentPassthroughFrame(includesOccluder: !occludingPlanes.isEmpty)
 
         inFlightSemaphore.wait()
 
@@ -208,7 +305,9 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         var didRender: Bool
         do {
             didRender = try splatRenderer.render(
-                viewports: [currentViewport()],
+                viewports: [ViewportDescriptorBuilder.make(size: drawableSize,
+                                                           projectionMatrix: projectionMatrix,
+                                                           viewMatrix: viewMatrix)],
                 colorTexture: colorTexture,
                 colorStoreAction: colorStoreAction,
                 depthTexture: depthTexture,
@@ -221,7 +320,13 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         }
 
         if didRender, let cameraFrame, let compositor {
+            let worldViewProjection = projectionMatrix * poseProvider.pose.viewMatrix
+            let occlusion = encodeOccluders(occludingPlanes,
+                                            viewProjection: worldViewProjection,
+                                            compositor: compositor,
+                                            commandBuffer: commandBuffer)
             didRender = compositor.composite(cameraFrame: cameraFrame,
+                                             occlusion: occlusion,
                                              into: drawable.texture,
                                              commandBuffer: commandBuffer)
         }
@@ -229,7 +334,10 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         // Indicators go last, straight into the drawable, over whichever path
         // produced the image.
         if didRender {
-            drawIndicators(into: drawable.texture, commandBuffer: commandBuffer)
+            drawIndicators(surfaces: surfaces,
+                           projectionMatrix: projectionMatrix,
+                           into: drawable.texture,
+                           commandBuffer: commandBuffer)
         }
 
         // Presenting a frame the renderer bailed on would show a partial image.
@@ -239,17 +347,29 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         commandBuffer.commit()
     }
 
-    private func drawIndicators(into target: MTLTexture, commandBuffer: MTLCommandBuffer) {
-        guard let gizmoRenderer, let gizmoState = gizmoStateSource?() else { return }
+    /// Rasterizes the surfaces into the occluder depth buffer. Returns the
+    /// settings the composite needs, or nil when there's nothing to occlude
+    /// with — in which case the composite skips the comparison entirely.
+    private func encodeOccluders(_ planes: [DetectedPlane],
+                                 viewProjection: simd_float4x4,
+                                 compositor: PassthroughCompositor,
+                                 commandBuffer: MTLCommandBuffer) -> OcclusionSettings? {
+        guard !planes.isEmpty,
+              let occluderRenderer,
+              let depthTexture = compositor.occluderDepthTexture,
+              occluderRenderer.draw(planes: planes,
+                                    viewProjection: viewProjection,
+                                    into: depthTexture,
+                                    commandBuffer: commandBuffer)
+        else { return nil }
+        return OcclusionSettings(nearZ: Constants.nearZ, farZ: Constants.farZ)
+    }
 
-        let aspectRatio = Float(drawableSize.width / drawableSize.height)
-        let projectionMatrix = poseProvider.projectionMatrix(viewportSize: drawableSize,
-                                                             nearZ: Constants.nearZ,
-                                                             farZ: Constants.farZ)
-            ?? perspectiveProjection(fovyRadians: poseProvider.verticalFieldOfView,
-                                     aspectRatio: aspectRatio,
-                                     nearZ: Constants.nearZ,
-                                     farZ: Constants.farZ)
+    private func drawIndicators(surfaces: (planes: [DetectedPlane], isPlacing: Bool)?,
+                                projectionMatrix: simd_float4x4,
+                                into target: MTLTexture,
+                                commandBuffer: MTLCommandBuffer) {
+        guard let gizmoRenderer, let surfaces else { return }
 
         // The gizmo is authored in world space, so it gets view × projection
         // without the model matrix. The splat's pivot maps to its placed
@@ -258,9 +378,14 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         let center = (anchor * sceneState.modelMatrix
                       * SIMD4<Float>(sceneState.pivot, 1)).xyz
 
+        let axisLength = sceneState.indicatorAxisLength
+        let ruler = rulerUnits.map { RulerScale.fitting(axisLength: axisLength, units: $0) }
+
         gizmoRenderer.draw(splatCenter: center,
-                           planes: gizmoState.planes,
-                           isPlacing: gizmoState.isPlacing,
+                           axisLength: axisLength,
+                           ruler: ruler,
+                           planes: surfaces.planes,
+                           isPlacing: surfaces.isPlacing,
                            viewProjection: projectionMatrix * poseProvider.pose.viewMatrix,
                            into: target,
                            commandBuffer: commandBuffer)
@@ -271,14 +396,15 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     /// Nil whenever passthrough should not run this frame — disabled, no
     /// source, no frame yet, or the offscreen targets couldn't be allocated.
     /// Every one of those falls back to the black path.
-    private func currentPassthroughFrame() -> CameraFrame? {
+    private func currentPassthroughFrame(includesOccluder: Bool) -> CameraFrame? {
         guard isPassthroughEnabled,
               let cameraFrameSource,
               cameraFrameSource.isCameraFrameAvailable,
               let compositor,
               compositor.prepareTargets(size: SIMD2(Int(drawableSize.width), Int(drawableSize.height)),
                                         colorFormat: Constants.colorFormat,
-                                        depthFormat: Constants.depthFormat)
+                                        depthFormat: Constants.depthFormat,
+                                        includesOccluder: includesOccluder)
         else { return nil }
         return cameraFrameSource.currentCameraFrame(viewportSize: drawableSize)
     }
@@ -292,31 +418,44 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
         poseProvider.update(deltaTime: now - lastFrameTimestamp)
     }
 
-    private func currentViewport() -> MetalSplatter.SplatRenderer.ViewportDescriptor {
+    private func currentProjection() -> simd_float4x4 {
         let aspectRatio = Float(drawableSize.width / drawableSize.height)
-        let projectionMatrix = poseProvider.projectionMatrix(viewportSize: drawableSize,
-                                                             nearZ: Constants.nearZ,
-                                                             farZ: Constants.farZ)
+        return poseProvider.projectionMatrix(viewportSize: drawableSize,
+                                             nearZ: Constants.nearZ,
+                                             farZ: Constants.farZ)
             ?? perspectiveProjection(fovyRadians: poseProvider.verticalFieldOfView,
                                      aspectRatio: aspectRatio,
                                      nearZ: Constants.nearZ,
                                      farZ: Constants.farZ)
+    }
 
-        // The splat's placement is folded into the view matrix; MetalSplatter
-        // takes only view and projection, not a separate model transform.
-        // The anchor sits outermost so ARKit's per-frame corrections apply to
-        // the whole splat rather than being fought by the local transform.
+    /// The splat's placement is folded into the view matrix; MetalSplatter
+    /// takes only view and projection, not a separate model transform. The
+    /// anchor sits outermost so ARKit's per-frame corrections apply to the
+    /// whole splat rather than being fought by the local transform.
+    ///
+    /// This is also what the chunk culler tests against, which is why chunk
+    /// bounds can stay in the splat's own coordinates.
+    private func currentViewMatrix() -> simd_float4x4 {
         let anchor = anchorTransformSource?() ?? matrix_identity_float4x4
-        let viewMatrix = poseProvider.pose.viewMatrix * anchor * sceneState.modelMatrix
+        return poseProvider.pose.viewMatrix * anchor * sceneState.modelMatrix
+    }
+}
 
-        return .init(viewport: MTLViewport(originX: 0,
-                                           originY: 0,
-                                           width: drawableSize.width,
-                                           height: drawableSize.height,
-                                           znear: 0,
-                                           zfar: 1),
-                     projectionMatrix: projectionMatrix,
-                     viewMatrix: viewMatrix,
-                     screenSize: SIMD2(x: Int(drawableSize.width), y: Int(drawableSize.height)))
+/// Small shim so the viewport descriptor's long argument list doesn't sit in
+/// the middle of `draw(in:)`.
+private enum ViewportDescriptorBuilder {
+    static func make(size: CGSize,
+                     projectionMatrix: simd_float4x4,
+                     viewMatrix: simd_float4x4) -> MetalSplatter.SplatRenderer.ViewportDescriptor {
+        .init(viewport: MTLViewport(originX: 0,
+                                    originY: 0,
+                                    width: size.width,
+                                    height: size.height,
+                                    znear: 0,
+                                    zfar: 1),
+              projectionMatrix: projectionMatrix,
+              viewMatrix: viewMatrix,
+              screenSize: SIMD2(x: Int(size.width), y: Int(size.height)))
     }
 }

@@ -90,6 +90,27 @@ final class SplatSceneState {
     /// it after the user has zoomed away.
     var fittedScale: Float = SplatScale.authored
 
+    /// The splat's own size in asset units, from the robust bounds at load.
+    /// Multiplied by `scale`, this is how big it actually is in the room, which
+    /// is what sizes the measuring axes.
+    var assetExtent: SIMD3<Float> = .zero
+
+    /// Splats in the source file before the quality budget strided any out.
+    /// Nil when the whole file was loaded.
+    var sourceSplatCount: Int?
+
+    // MARK: - Culling readout
+
+    /// Mirrored out of `SplatChunkCuller` so the menu can show it.
+    ///
+    /// The culler is a plain class the render loop owns, not an `@Observable`,
+    /// so SwiftUI has no way to notice its counters changing. These are written
+    /// only when the visible set actually changes — writing them every frame
+    /// would invalidate the whole viewer hierarchy at display rate.
+    var chunkCount = 0
+    var visibleChunkCount = 0
+    var visibleSplatCount = 0
+
     static let scaleRange = SplatScale.range
 
     /// Splat count above which frame rate starts falling off on device,
@@ -104,6 +125,22 @@ final class SplatSceneState {
     /// small is obviously there and can be scaled up, whereas one that's too
     /// large puts the camera inside geometry and looks like a failed load.
     static let autoFitExtent: Float = 1.5
+
+    /// Half-length of one measuring axis, in meters of real space.
+    ///
+    /// Derived from the splat's footprint so the ruler spans something
+    /// comparable to what's on screen: a ruler fixed at 25 cm is useless
+    /// against a room and swamps a figurine. Clamped because a splat scaled to
+    /// either extreme would otherwise produce a gizmo the size of a house or
+    /// one too small to see.
+    var indicatorAxisLength: Float {
+        let footprint = max(assetExtent.x, assetExtent.z)
+        let world = footprint * SplatScale.clamp(scale) * 0.5
+        guard world.isFinite, world > 0 else { return Self.defaultAxisLength }
+        return min(max(world, 0.15), 2.0)
+    }
+
+    static let defaultAxisLength: Float = 0.25
 
     // MARK: - Transform
 
@@ -165,6 +202,8 @@ final class SplatSceneState {
         placedTransform = matrix_identity_float4x4
         pivot = .zero
         fittedScale = SplatScale.authored
+        assetExtent = .zero
+        sourceSplatCount = nil
         resetPlacement()
     }
 }

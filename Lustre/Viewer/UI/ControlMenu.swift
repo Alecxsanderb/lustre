@@ -18,10 +18,20 @@ struct ControlMenu: View {
     var statusMessage: String?
     var isPassthroughAvailable: Bool
     var isPlacementAvailable: Bool
+    var isOcclusionAvailable: Bool
+    /// Minor and major tick intervals, named — the gizmo draws no text, so
+    /// this is where the notches get their units.
+    var rulerDescription: (minor: String, major: String)?
+    var cullingSummary: (visibleChunks: Int, totalChunks: Int, visibleSplats: Int)?
+
     var onRecenter: () -> Void
     var onBackgroundChange: (ViewerUIState.Background) -> Void
     var onReplace: () -> Void
     var onIndicatorsChange: (Bool) -> Void
+    var onMeasuringTicksChange: (Bool) -> Void
+    var onRulerUnitsChange: (RulerUnits) -> Void
+    var onOcclusionChange: (Bool) -> Void
+    var onQualityChange: (SplatQuality) -> Void
 
     /// One nudge step, in meters. Small enough to fine-tune, large enough that
     /// repeated taps get somewhere.
@@ -50,10 +60,12 @@ struct ControlMenu: View {
             statusSummary
             Spacer(minLength: 8)
             if uiState.areGesturesEnabled {
-                Image(systemName: "hand.draw")
+                Image(systemName: uiState.locksToSingleAxis ? "hand.point.up.left" : "hand.draw")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("Touch controls on")
+                    .accessibilityLabel(uiState.locksToSingleAxis
+                                        ? "Touch controls on, locked to one axis"
+                                        : "Touch controls on")
             }
             Button {
                 uiState.isMenuExpanded.toggle()
@@ -86,6 +98,10 @@ struct ControlMenu: View {
                 Text(name).font(.footnote.weight(.medium)).lineLimit(1)
                 if let statusMessage {
                     Text(statusMessage).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                } else if let sourceCount = sceneState.sourceSplatCount {
+                    Text("\(splatCount) of \(sourceCount) splats loaded")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 } else if splatCount > SplatSceneState.performanceWarningSplatCount {
                     Label("^[\(splatCount) splat](inflect: true) — may run slowly",
                           systemImage: "exclamationmark.triangle.fill")
@@ -113,7 +129,7 @@ struct ControlMenu: View {
                 }
             }
             Divider().opacity(0.4)
-            gestureToggle
+            gestureControls
         }
         .padding(14)
         .frame(maxWidth: 340)
@@ -135,6 +151,9 @@ struct ControlMenu: View {
                         .rotationEffect(.degrees(uiState.expandedSection == section ? 0 : -90))
                         .foregroundStyle(.secondary)
                 }
+                // Without this the gap between the title and the chevron isn't
+                // tappable, so most of a full-width row does nothing.
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -144,6 +163,7 @@ struct ControlMenu: View {
                 case .orientation: orientationControls
                 case .position: positionControls
                 case .display: displayControls
+                case .performance: performanceControls
                 }
             }
         }
@@ -287,6 +307,23 @@ struct ControlMenu: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
+            if uiState.showsPlacementIndicators {
+                measuringControls
+            }
+
+            Toggle("Hide splats behind surfaces", isOn: Binding(
+                get: { uiState.occludesBehindSurfaces },
+                set: { onOcclusionChange($0) }
+            ))
+            .font(.footnote)
+            .disabled(!isOcclusionAvailable)
+
+            Text(isOcclusionAvailable
+                 ? "Splats behind a detected floor or table are hidden, so the splat looks like it's really in the room. Only as accurate as the detected surface."
+                 : "Occlusion needs the camera background and a device with AR support.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
             Toggle("Flip up axis", isOn: $sceneState.appliesUpCalibration)
                 .font(.footnote)
 
@@ -301,10 +338,86 @@ struct ControlMenu: View {
         }
     }
 
-    private var gestureToggle: some View {
-        Toggle(isOn: $uiState.areGesturesEnabled) {
-            Label("Touch controls", systemImage: "hand.draw")
-                .font(.subheadline.weight(.medium))
+    /// The measuring stick: the notches are real-world sized whatever the
+    /// splat's own units are, so pacing them off tells you how big it is.
+    private var measuringControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Measuring notches", isOn: Binding(
+                get: { uiState.showsMeasuringTicks },
+                set: { onMeasuringTicksChange($0) }
+            ))
+            .font(.footnote)
+
+            if uiState.showsMeasuringTicks {
+                Picker("Units", selection: Binding(
+                    get: { uiState.rulerUnits },
+                    set: { onRulerUnitsChange($0) }
+                )) {
+                    ForEach(RulerUnits.allCases) { unit in
+                        Text(unit.title).tag(unit)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if let rulerDescription {
+                    Text("Small notch \(rulerDescription.minor) · long notch \(rulerDescription.major)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.leading, 10)
+    }
+
+    // MARK: - Performance
+
+    private var performanceControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Detail", selection: Binding(
+                get: { uiState.quality },
+                set: { onQualityChange($0) }
+            )) {
+                ForEach(SplatQuality.allCases) { quality in
+                    Text(quality.title).tag(quality)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(sceneState.loadState.isLoading)
+
+            Text("\(uiState.quality.detail) Changing this re-reads the file.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if let cullingSummary {
+                Label("\(cullingSummary.visibleChunks) of \(cullingSummary.totalChunks) chunks on screen · \(cullingSummary.visibleSplats) splats drawn",
+                      systemImage: "square.grid.3x3")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Splats off screen are skipped. Everything in view still costs full price — there's no occlusion between splats, so a dense capture is slow however close you stand.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Gestures
+
+    private var gestureControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: $uiState.areGesturesEnabled) {
+                Label("Touch controls", systemImage: "hand.draw")
+                    .font(.subheadline.weight(.medium))
+            }
+
+            if uiState.areGesturesEnabled {
+                Toggle("Lock to one axis", isOn: $uiState.locksToSingleAxis)
+                    .font(.footnote)
+
+                Text("A two-finger gesture changes one thing: whichever of move, scale, or rotate you start with wins until you lift your fingers. Dragging also sticks to one direction.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.top, 2)
     }

@@ -36,7 +36,7 @@ final class ViewerUIState {
     }
 
     enum Section: String, Hashable, Identifiable, CaseIterable {
-        case placement, orientation, position, display
+        case placement, orientation, position, display, performance
 
         var id: String { rawValue }
 
@@ -46,6 +46,7 @@ final class ViewerUIState {
             case .orientation: "Orientation"
             case .position: "Position"
             case .display: "Display"
+            case .performance: "Performance"
             }
         }
 
@@ -55,6 +56,7 @@ final class ViewerUIState {
             case .orientation: "rotate.3d"
             case .position: "move.3d"
             case .display: "photo"
+            case .performance: "speedometer"
             }
         }
     }
@@ -67,9 +69,29 @@ final class ViewerUIState {
 
     var areGesturesEnabled = true
 
+    /// One two-finger gesture changes one thing. Off by default because the
+    /// combined gesture is faster once you're used to it; on, it's far easier
+    /// to make a small correction without disturbing scale and rotation.
+    var locksToSingleAxis = false
+
     /// Axis bars and surface outlines. Off by default — they drive plane
     /// detection, which costs CPU every frame.
     var showsPlacementIndicators = false
+
+    /// Notches at real-world intervals along the axis bars. Only drawn when
+    /// the indicators are on, since they're marks *on* those bars.
+    var showsMeasuringTicks = true
+
+    var rulerUnits: RulerUnits = .meters
+
+    /// Hide splats that sit behind a detected real surface. Off by default: it
+    /// needs surface detection *and* the camera background, and it's only as
+    /// good as ARKit's plane estimate.
+    var occludesBehindSurfaces = false
+
+    /// How much of a file to load. Applied on the next load, so changing it
+    /// re-reads the current splat.
+    var quality: SplatQuality = .full
 
     /// Pitch and roll are hidden until asked for. Yaw covers almost every real
     /// capture, and three rotation sliders reads as a debug panel.
