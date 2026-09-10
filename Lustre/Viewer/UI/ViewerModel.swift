@@ -40,6 +40,10 @@ final class ViewerModel {
     /// the simulator, where no pose provider supplies camera frames.
     private var testPatternSource: TestPatternCameraSource?
 
+    /// Nil where the pose provider can't find surfaces. Placement then falls
+    /// back to committing wherever the splat already is.
+    private var surfaceProvider: (any SurfaceProvider)?
+
     private var memoryWarningObserver: (any NSObjectProtocol)?
 
     init() {
@@ -61,6 +65,16 @@ final class ViewerModel {
         }
         self.renderer = renderer
         attachCameraFrameSource(to: renderer, provider: provider, device: device)
+
+        surfaceProvider = provider as? any SurfaceProvider
+        renderer.anchorTransformSource = { [weak self] in
+            self?.currentAnchorTransform ?? matrix_identity_float4x4
+        }
+        renderer.gizmoStateSource = { [weak self] in
+            guard let self else { return nil }
+            return (planes: surfaceProvider?.detectedPlanes ?? [],
+                    isPlacing: sceneState.placementState == .awaitingSurface)
+        }
     }
 
     /// ARKit is unavailable in the simulator and on older hardware; the
@@ -98,9 +112,73 @@ final class ViewerModel {
 
     var isPassthroughAvailable: Bool { renderer?.isPassthroughAvailable ?? false }
 
+    var isPlacementAvailable: Bool { surfaceProvider != nil }
+
+    /// What the placement UI shows while awaiting a surface.
+    var placementCandidate: PlacementCandidate? { surfaceProvider?.placementCandidate }
+
+    var isAwaitingPlacement: Bool { sceneState.placementState == .awaitingSurface }
+
+    /// The splat's world anchor for this frame.
+    ///
+    /// While placing, it tracks the crosshair so the splat previews where it
+    /// will land. Once placed it comes from the anchor, re-read every frame so
+    /// platform map refinements move the splat with the world instead of
+    /// letting it drift.
+    var currentAnchorTransform: simd_float4x4 {
+        switch sceneState.placementState {
+        case .awaitingSurface:
+            return placementCandidate?.transform ?? sceneState.placedTransform
+        case .placed:
+            if let anchorID = sceneState.anchorID,
+               let transform = surfaceProvider?.anchorTransform(for: anchorID) {
+                return transform
+            }
+            return sceneState.placedTransform
+        }
+    }
+
+    // MARK: - Placement
+
+    /// Enters placement mode. Called after every load, and from the menu to
+    /// re-place an already-placed splat.
+    func beginPlacement() {
+        guard isPlacementAvailable else { return }
+        if let anchorID = sceneState.anchorID {
+            surfaceProvider?.removeAnchor(anchorID)
+            sceneState.anchorID = nil
+        }
+        sceneState.placementState = .awaitingSurface
+        syncSurfaceDetection()
+    }
+
+    func confirmPlacement() {
+        guard sceneState.placementState == .awaitingSurface else { return }
+        let transform = placementCandidate?.transform ?? sceneState.placedTransform
+        sceneState.placedTransform = transform
+        sceneState.anchorID = surfaceProvider?.makeAnchor(at: transform)
+        sceneState.placementState = .placed
+        syncSurfaceDetection()
+    }
+
+    func setIndicatorsEnabled(_ enabled: Bool) {
+        uiState.showsPlacementIndicators = enabled
+        renderer?.setIndicatorsEnabled(enabled)
+        syncSurfaceDetection()
+    }
+
+    /// Surface detection runs only when something needs it — the indicators or
+    /// an active placement. It costs CPU every frame otherwise.
+    private func syncSurfaceDetection() {
+        surfaceProvider?.isSurfaceDetectionEnabled =
+            uiState.showsPlacementIndicators || sceneState.placementState == .awaitingSurface
+    }
+
     func onAppear() {
         poseProvider.start()
         observeMemoryWarnings()
+        // Apply the default background; nothing has pushed it to the renderer yet.
+        renderer?.setPassthroughEnabled(uiState.background == .camera)
     }
 
     func onDisappear() {
@@ -180,6 +258,8 @@ final class ViewerModel {
                            appliesUpCalibration: appliesUpCalibration,
                            hasAuthoredPlacement: hasAuthoredPlacement)
             sceneState.loadState = .loaded(name: name, splatCount: scene.points.count)
+            // Ask the user where it goes rather than dropping it on their face.
+            beginPlacement()
         } catch {
             sceneState.loadState = .failed(error.localizedDescription)
         }

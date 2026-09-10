@@ -4,10 +4,14 @@
 //
 //  Direct manipulation of the splat.
 //
-//  Everything here is two-finger, on purpose. Single-finger drags are already
-//  spoken for: `VirtualJoystick` sits above the render view and uses
-//  `DragGesture(minimumDistance: 0)`, and `NavigationStack` owns the leading
-//  screen edge for interactive pop.
+//  Two-finger gestures scale, rotate, and slide the splat. One finger — the
+//  most-reached-for control, pushing a too-close splat away — is a vertical
+//  dolly along the camera's heading.
+//
+//  One finger is safe *outside* the joystick wells: `VirtualJoystick` sits
+//  above the render view with `.contentShape(Circle())`, so it only claims
+//  touches inside its circle. The leading screen edge is excluded explicitly,
+//  because `NavigationStack` owns it for interactive pop.
 //
 //  All three recognizers are UIKit rather than SwiftUI. A `UIView` hosting a
 //  recognizer consumes touches before any SwiftUI gesture layered beneath it
@@ -41,16 +45,28 @@ struct SplatGestureLayer: UIViewRepresentable {
                                                  action: #selector(Coordinator.handleRotate(_:)))
         let pan = UIPanGestureRecognizer(target: coordinator,
                                          action: #selector(Coordinator.handlePan(_:)))
-        // Two fingers exactly: one finger belongs to the joysticks and to the
-        // navigation edge swipe.
         pan.minimumNumberOfTouches = 2
         pan.maximumNumberOfTouches = 2
 
-        for recognizer in [pinch, rotate, pan] as [UIGestureRecognizer] {
+        let dolly = UIPanGestureRecognizer(target: coordinator,
+                                           action: #selector(Coordinator.handleDolly(_:)))
+        dolly.minimumNumberOfTouches = 1
+        // Ends as soon as a second finger lands, handing over to pan/pinch.
+        dolly.maximumNumberOfTouches = 1
+
+        for recognizer in [pinch, rotate, pan, dolly] as [UIGestureRecognizer] {
             recognizer.delegate = coordinator
+            // Recognizing must not cancel or delay touches being delivered
+            // elsewhere. By default a recognizer sends touchesCancelled to the
+            // hit-tested view when it recognizes, which kills the continuous
+            // tracking SwiftUI's `Toggle` depends on — every switch in the
+            // control menu silently stopped working.
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesBegan = false
+            recognizer.delaysTouchesEnded = false
             view.addGestureRecognizer(recognizer)
         }
-        coordinator.recognizers = [pinch, rotate, pan]
+        coordinator.recognizers = [pinch, rotate, pan, dolly]
         return view
     }
 
@@ -69,6 +85,14 @@ struct SplatGestureLayer: UIViewRepresentable {
         /// moves the splat about a meter.
         private static let pointsPerMeter: Float = 320
 
+        /// Dolly is coarser than lateral panning — pushing a splat out of your
+        /// face is a bigger movement than nudging it sideways.
+        private static let dollyPointsPerMeter: Float = 160
+
+        /// Touches starting this close to the leading edge are left to
+        /// `NavigationStack`'s interactive-pop recognizer.
+        private static let leadingEdgeExclusion: CGFloat = 24
+
         var sceneState: SplatSceneState
         var cameraTransform: () -> simd_float4x4
         var recognizers: [UIGestureRecognizer] = []
@@ -80,6 +104,8 @@ struct SplatGestureLayer: UIViewRepresentable {
         private var yawAtStart: Float?
         private var translationAtStart: SIMD3<Float>?
         private var basisAtStart: CameraRelativeBasis?
+        private var dollyTranslationAtStart: SIMD3<Float>?
+        private var dollyBasisAtStart: CameraRelativeBasis?
 
         init(sceneState: SplatSceneState, cameraTransform: @escaping () -> simd_float4x4) {
             self.sceneState = sceneState
@@ -132,10 +158,50 @@ struct SplatGestureLayer: UIViewRepresentable {
             }
         }
 
+        /// Vertical one-finger drag pushes the splat along the camera's
+        /// heading: down pulls it toward you, up pushes it away. Horizontal
+        /// movement is ignored so a sloppy drag doesn't also slide it sideways.
+        @objc func handleDolly(_ recognizer: UIPanGestureRecognizer) {
+            switch recognizer.state {
+            case .began:
+                dollyTranslationAtStart = sceneState.translation
+                dollyBasisAtStart = CameraRelativeBasis(cameraTransform: cameraTransform())
+            case .changed:
+                guard let dollyTranslationAtStart, let dollyBasisAtStart else { return }
+                let translation = recognizer.translation(in: recognizer.view)
+                // UIKit y grows downward, so dragging up is negative.
+                let forward = Float(-translation.y) / Self.dollyPointsPerMeter
+                sceneState.translation = dollyTranslationAtStart + dollyBasisAtStart.worldDelta(
+                    right: 0, up: 0, forward: forward)
+            default:
+                dollyTranslationAtStart = nil
+                dollyBasisAtStart = nil
+            }
+        }
+
         nonisolated func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
             true
+        }
+
+        /// Only take touches that actually landed on the gesture layer itself.
+        ///
+        /// Without this, these recognizers observe touches destined for the
+        /// SwiftUI controls layered above and cancel them. Buttons survive
+        /// (they fire on touch-up), but `Toggle` tracks the touch continuously
+        /// and loses it — which silently broke every switch in the menu.
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+                               shouldReceive touch: UITouch) -> Bool {
+            touch.view === recognizer.view
+        }
+
+        /// Keeps the one-finger dolly off the interactive-pop edge.
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = recognizer as? UIPanGestureRecognizer,
+                  pan.maximumNumberOfTouches == 1,
+                  let view = pan.view else { return true }
+            return pan.location(in: view).x > Self.leadingEdgeExclusion
         }
     }
 }

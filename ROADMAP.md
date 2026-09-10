@@ -134,9 +134,14 @@ provider is active, so an AR-specific view had nothing left to do.
 **Scope (current):**
 - 6DoF AR pose drives the virtual camera through the splat
 - Simulator mode with dual joysticks for AR-less testing
+- Tap-to-place on a detected surface on load, anchored so ARKit's corrections
+  keep it put; re-place from the menu
 - Manual placement: log-scale sizing, yaw (plus pitch/roll), camera-relative
   translation, all pivot-bracketed so they act in place
-- Collapsible control menu; two-finger gestures with a global on/off
+- Position indicators (axis bars, drop line, surface outlines), toggleable —
+  and surface detection stops when they're off
+- Collapsible control menu; one-finger dolly plus two-finger gestures, with a
+  global on/off
 - Black or camera-passthrough background
 - File picker entry (will be replaced by Library integration)
 
@@ -149,7 +154,13 @@ provider is active, so an AR-specific view had nothing left to do.
 - **SOG and other compressed containers.** MetalSplatter has no reader for them
   at any version, so this needs a decoder written from scratch (WebP planes plus
   a container unzip). Currently recognized and rejected with a clear message.
-- Anchored placement (detect plane, tap to place) — INTEGRATION.md §5
+- ~~Anchored placement (detect plane, tap to place)~~ — done; also the likely
+  fix for splats drifting relative to the room
+- ~~Position indicators (axis bars, surface outlines)~~ — done
+- **Performance.** Falloff starts ~500k splats. Next lever is spatial chunking
+  plus frustum/distance culling via `setChunkEnabled`, which needs no fork.
+  Per-splat occlusion would require vendoring MetalSplatter to add a shader
+  early-out — deliberately not taken. See INTEGRATION.md "Performance".
 - Snapshot / screen recording from within the viewer
 - Saved viewpoints / bookmarks within a splat
 - Use ARKit camera intrinsics for projection (already noted in INTEGRATION.md)

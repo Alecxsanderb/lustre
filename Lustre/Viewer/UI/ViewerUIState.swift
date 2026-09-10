@@ -67,11 +67,18 @@ final class ViewerUIState {
 
     var areGesturesEnabled = true
 
+    /// Axis bars and surface outlines. Off by default — they drive plane
+    /// detection, which costs CPU every frame.
+    var showsPlacementIndicators = false
+
     /// Pitch and roll are hidden until asked for. Yaw covers almost every real
     /// capture, and three rotation sliders reads as a debug panel.
     var showsAdvancedRotation = false
 
-    var background: Background = .black
+    /// Camera by default: the point of the viewer is a splat sitting in your
+    /// room, and a black background hides that. Falls back to black
+    /// automatically wherever no camera frames exist.
+    var background: Background = .camera
 
     func toggle(_ section: Section) {
         expandedSection = (expandedSection == section) ? nil : section

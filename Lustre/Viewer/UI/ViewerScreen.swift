@@ -44,13 +44,26 @@ struct ViewerScreen: View {
                     SimulatorControlsOverlay(provider: simulatedProvider)
                 }
 
-                ControlMenu(sceneState: model.sceneState,
-                            uiState: model.uiState,
-                            statusMessage: model.statusMessage,
-                            isPassthroughAvailable: model.isPassthroughAvailable,
-                            onRecenter: model.recenter,
-                            onBackgroundChange: model.setBackground)
-                    .padding(.bottom, 8)
+                // The menu would compete with the placement step for the same
+                // corner, and placement is modal by nature.
+                if !model.isAwaitingPlacement {
+                    ControlMenu(sceneState: model.sceneState,
+                                uiState: model.uiState,
+                                statusMessage: model.statusMessage,
+                                isPassthroughAvailable: model.isPassthroughAvailable,
+                                isPlacementAvailable: model.isPlacementAvailable,
+                                onRecenter: model.recenter,
+                                onBackgroundChange: model.setBackground,
+                                onReplace: model.beginPlacement,
+                                onIndicatorsChange: model.setIndicatorsEnabled)
+                        .padding(.bottom, 8)
+                }
+            }
+
+            if model.isAwaitingPlacement {
+                PlacementOverlay(candidate: model.placementCandidate,
+                                 hasDetectedSurface: model.placementCandidate?.isOnSurface == true,
+                                 onPlace: model.confirmPlacement)
             }
         }
         .navigationTitle("Viewer")

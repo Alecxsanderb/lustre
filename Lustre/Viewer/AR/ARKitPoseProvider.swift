@@ -56,6 +56,12 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
     private var latestCamera: ARCamera?
     private var isRunning = false
 
+    /// Backing storage for `SurfaceProvider` (extensions can't add stored
+    /// properties).
+    fileprivate var detectsSurfaces = false
+    fileprivate var planes: [DetectedPlane] = []
+    fileprivate var placedAnchorIDs: Set<UUID> = []
+
     func start() {
         guard Self.isSupported else {
             statusMessage = "AR tracking isn't available on this device."
@@ -63,7 +69,7 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
         }
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravity
-        configuration.planeDetection = []
+        configuration.planeDetection = detectsSurfaces ? [.horizontal] : []
         session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
         statusMessage = "Move the phone slowly to start tracking."
@@ -83,6 +89,7 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
         let camera = frame.camera
         latestCamera = camera
         statusMessage = message(for: camera.trackingState)
+        refreshPlanes(from: frame)
 
         // A pose from a non-tracking camera is garbage; hold the last good one.
         guard case .normal = camera.trackingState else { return }
@@ -223,5 +230,106 @@ extension ARKitPoseProvider: CameraFrameSource {
         return simd_float3x3(columns: (SIMD3<Float>(Float(transform.a), Float(transform.b), 0),
                                        SIMD3<Float>(Float(transform.c), Float(transform.d), 0),
                                        SIMD3<Float>(Float(transform.tx), Float(transform.ty), 1)))
+    }
+}
+
+// MARK: - SurfaceProvider
+
+extension ARKitPoseProvider: SurfaceProvider {
+
+    /// Where the candidate goes when no plane is under the crosshair.
+    private static let fallbackDistance: Float = 1.5
+
+    var isSurfaceDetectionEnabled: Bool {
+        get { detectsSurfaces }
+        set {
+            guard newValue != detectsSurfaces else { return }
+            detectsSurfaces = newValue
+            // Actually stop the work rather than just hiding results — plane
+            // detection costs CPU every frame, and this runs alongside splat
+            // sorting on a thermally constrained device.
+            reconfigureSession()
+            if !newValue { planes.removeAll() }
+        }
+    }
+
+    private(set) var detectedPlanes: [DetectedPlane] {
+        get { planes }
+        set { planes = newValue }
+    }
+
+    /// Raycast straight down the middle of the screen.
+    ///
+    /// `ARFrame.raycastQuery` takes a point in **normalized image space**, so
+    /// screen center is (0.5, 0.5) and no view geometry is needed.
+    var placementCandidate: PlacementCandidate? {
+        guard isRunning, let frame = session.currentFrame else { return nil }
+        guard case .normal = frame.camera.trackingState else { return nil }
+
+        if detectsSurfaces {
+            let query = frame.raycastQuery(from: CGPoint(x: 0.5, y: 0.5),
+                                           allowing: .estimatedPlane,
+                                           alignment: .horizontal)
+            if let hit = session.raycast(query).first {
+                return PlacementCandidate(transform: hit.worldTransform, isOnSurface: true)
+            }
+        }
+
+        // Nothing under the crosshair: float it a fixed distance ahead and let
+        // the UI say so, rather than implying it's grounded.
+        let cameraTransform = simd_inverse(frame.camera.viewMatrix(for: interfaceOrientation))
+        let origin = cameraTransform.columns.3.xyz
+        let forward = -cameraTransform.columns.2.xyz
+        return PlacementCandidate(
+            transform: matrix4x4_translation(origin + forward * Self.fallbackDistance),
+            isOnSurface: false)
+    }
+
+    func makeAnchor(at transform: simd_float4x4) -> UUID? {
+        guard isRunning else { return nil }
+        let anchor = ARAnchor(name: "splat", transform: transform)
+        session.add(anchor: anchor)
+        placedAnchorIDs.insert(anchor.identifier)
+        return anchor.identifier
+    }
+
+    /// Re-read every frame. ARKit refines anchor transforms as its map
+    /// improves; a cached copy is exactly what makes a splat appear to drift.
+    func anchorTransform(for id: UUID) -> simd_float4x4? {
+        session.currentFrame?.anchors.first { $0.identifier == id }?.transform
+    }
+
+    func removeAnchor(_ id: UUID) {
+        guard let anchor = session.currentFrame?.anchors.first(where: { $0.identifier == id })
+        else { return }
+        session.remove(anchor: anchor)
+        placedAnchorIDs.remove(id)
+    }
+
+    /// Mirrors ARKit's plane anchors into the ARKit-free `DetectedPlane` type.
+    /// Called from `update(deltaTime:)`, which already polls the frame.
+    func refreshPlanes(from frame: ARFrame) {
+        guard detectsSurfaces else { return }
+        planes = frame.anchors.compactMap { anchor in
+            guard let plane = anchor as? ARPlaneAnchor,
+                  plane.alignment == .horizontal else { return nil }
+            // planeExtent is in the anchor's local space, centered on `center`.
+            var transform = plane.transform
+            transform.columns.3 += simd_float4(plane.center.x, plane.center.y, plane.center.z, 0)
+            return DetectedPlane(id: plane.identifier,
+                                 transform: transform,
+                                 extent: SIMD2(plane.planeExtent.width, plane.planeExtent.height))
+        }
+    }
+
+    /// Re-runs the session with the current plane-detection setting.
+    /// Deliberately *without* `.resetTracking` — restarting would throw away
+    /// the map and every placed anchor.
+    private func reconfigureSession() {
+        guard isRunning else { return }
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.worldAlignment = .gravity
+        configuration.planeDetection = detectsSurfaces ? [.horizontal] : []
+        session.run(configuration)
     }
 }

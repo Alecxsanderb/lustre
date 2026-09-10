@@ -51,6 +51,18 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     private weak var cameraFrameSource: (any CameraFrameSource)?
     private var compositor: PassthroughCompositor?
 
+    // MARK: - Placement
+
+    /// Supplies the splat's world anchor each frame. Owned by `ViewerModel`,
+    /// which holds the placement policy; the renderer only multiplies it in.
+    var anchorTransformSource: (() -> simd_float4x4)?
+
+    /// Supplies indicator geometry each frame. Nil disables the gizmo pass
+    /// entirely, including its allocations.
+    var gizmoStateSource: (() -> (planes: [DetectedPlane], isPlacing: Bool)?)?
+
+    private var gizmoRenderer: GizmoRenderer?
+
     init?(device: MTLDevice, sceneState: SplatSceneState, poseProvider: any PoseProvider) {
         guard let commandQueue = device.makeCommandQueue() else { return nil }
         self.device = device
@@ -104,6 +116,16 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
     /// part we can give back immediately.
     func releaseDiscretionaryResources() {
         compositor?.releaseTargets()
+    }
+
+    func setIndicatorsEnabled(_ enabled: Bool) {
+        if enabled {
+            if gizmoRenderer == nil {
+                gizmoRenderer = GizmoRenderer(device: device, colorFormat: Constants.colorFormat)
+            }
+        } else {
+            gizmoRenderer = nil
+        }
     }
 
     // MARK: - Loading
@@ -204,11 +226,44 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
                                              commandBuffer: commandBuffer)
         }
 
+        // Indicators go last, straight into the drawable, over whichever path
+        // produced the image.
+        if didRender {
+            drawIndicators(into: drawable.texture, commandBuffer: commandBuffer)
+        }
+
         // Presenting a frame the renderer bailed on would show a partial image.
         if didRender {
             commandBuffer.present(drawable)
         }
         commandBuffer.commit()
+    }
+
+    private func drawIndicators(into target: MTLTexture, commandBuffer: MTLCommandBuffer) {
+        guard let gizmoRenderer, let gizmoState = gizmoStateSource?() else { return }
+
+        let aspectRatio = Float(drawableSize.width / drawableSize.height)
+        let projectionMatrix = poseProvider.projectionMatrix(viewportSize: drawableSize,
+                                                             nearZ: Constants.nearZ,
+                                                             farZ: Constants.farZ)
+            ?? perspectiveProjection(fovyRadians: poseProvider.verticalFieldOfView,
+                                     aspectRatio: aspectRatio,
+                                     nearZ: Constants.nearZ,
+                                     farZ: Constants.farZ)
+
+        // The gizmo is authored in world space, so it gets view × projection
+        // without the model matrix. The splat's pivot maps to its placed
+        // position through the full anchor × model chain.
+        let anchor = anchorTransformSource?() ?? matrix_identity_float4x4
+        let center = (anchor * sceneState.modelMatrix
+                      * SIMD4<Float>(sceneState.pivot, 1)).xyz
+
+        gizmoRenderer.draw(splatCenter: center,
+                           planes: gizmoState.planes,
+                           isPlacing: gizmoState.isPlacing,
+                           viewProjection: projectionMatrix * poseProvider.pose.viewMatrix,
+                           into: target,
+                           commandBuffer: commandBuffer)
     }
 
     // MARK: - Frame setup
@@ -249,7 +304,10 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
 
         // The splat's placement is folded into the view matrix; MetalSplatter
         // takes only view and projection, not a separate model transform.
-        let viewMatrix = poseProvider.pose.viewMatrix * sceneState.modelMatrix
+        // The anchor sits outermost so ARKit's per-frame corrections apply to
+        // the whole splat rather than being fought by the local transform.
+        let anchor = anchorTransformSource?() ?? matrix_identity_float4x4
+        let viewMatrix = poseProvider.pose.viewMatrix * anchor * sceneState.modelMatrix
 
         return .init(viewport: MTLViewport(originX: 0,
                                            originY: 0,

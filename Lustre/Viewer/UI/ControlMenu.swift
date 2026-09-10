@@ -17,8 +17,11 @@ struct ControlMenu: View {
 
     var statusMessage: String?
     var isPassthroughAvailable: Bool
+    var isPlacementAvailable: Bool
     var onRecenter: () -> Void
     var onBackgroundChange: (ViewerUIState.Background) -> Void
+    var onReplace: () -> Void
+    var onIndicatorsChange: (Bool) -> Void
 
     /// One nudge step, in meters. Small enough to fine-tune, large enough that
     /// repeated taps get somewhere.
@@ -83,6 +86,11 @@ struct ControlMenu: View {
                 Text(name).font(.footnote.weight(.medium)).lineLimit(1)
                 if let statusMessage {
                     Text(statusMessage).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                } else if splatCount > SplatSceneState.performanceWarningSplatCount {
+                    Label("^[\(splatCount) splat](inflect: true) — may run slowly",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.orange)
                 } else {
                     Text("^[\(splatCount) splat](inflect: true) · \(SplatScale.formatted(sceneState.scale))")
                         .font(.caption2.monospacedDigit())
@@ -206,9 +214,17 @@ struct ControlMenu: View {
 
     private var positionControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Two-finger drag to move, or nudge:")
+            Text("One finger up/down pushes it away or pulls it closer. Two-finger drag moves it sideways, or nudge:")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if isPlacementAvailable {
+                Button { onReplace() } label: {
+                    Label("Re-place on a surface", systemImage: "arrow.down.to.line")
+                }
+                .buttonStyle(.bordered)
+                .font(.footnote)
+            }
 
             HStack(spacing: 6) {
                 nudgeButton("arrow.left", axis: SIMD3(-1, 0, 0))
@@ -259,6 +275,17 @@ struct ControlMenu: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+
+            Toggle("Position indicators", isOn: Binding(
+                get: { uiState.showsPlacementIndicators },
+                set: { onIndicatorsChange($0) }
+            ))
+            .font(.footnote)
+            .disabled(!isPlacementAvailable)
+
+            Text("Axis bars at the splat's center and outlines of detected surfaces. Turning this on enables surface detection, which costs performance.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
 
             Toggle("Flip up axis", isOn: $sceneState.appliesUpCalibration)
                 .font(.footnote)

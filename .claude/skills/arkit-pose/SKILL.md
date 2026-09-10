@@ -71,9 +71,23 @@ constructed with `maxViewCount: 1`.
 The camera model is spatial, not orbit: the splat is world-anchored and the user
 moves the phone to look around it, like Apple's Measure app.
 
-## Placement requires plane detection
+## Placement (built)
 
-`ARKitPoseProvider` currently sets `configuration.planeDetection = []`. The
+`SurfaceProvider` is the third ARKit-free seam, alongside `PoseProvider` and
+`CameraFrameSource`: plane detection, a center-screen raycast, and anchoring.
+`SimulatedPoseProvider` adopts it with a synthetic floor at y = -1.5, so the
+placement flow and gizmo are simulator-testable.
+
+**Anchor, don't hardcode.** A splat at a fixed world transform drifts because
+ARKit refines its map and the transform doesn't follow. Re-read
+`anchorTransform(for:)` every frame. Re-running the session to change plane
+detection must omit `.resetTracking`, or placed anchors are lost.
+
+Plane detection is enabled only while placing or while indicators are on.
+
+### Historical note
+
+`ARKitPoseProvider` used to set `configuration.planeDetection = []`. The
 placement flow needs `[.horizontal]` — detect a plane, raycast to tap-place an
 `ARAnchor`, then pinch-to-scale and two-finger-rotate to fit. This matters
 because Luma-style SfM output has an arbitrary coordinate frame and arbitrary

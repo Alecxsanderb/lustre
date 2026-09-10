@@ -213,10 +213,36 @@ owns the leading edge. They are **UIKit** recognizers, not SwiftUI gestures: a
 `UIView` hosting a recognizer consumes touches before any SwiftUI gesture
 beneath it, which silently swallowed `MagnifyGesture` on the first attempt.
 
-### Still to build: anchored placement
+### Built: anchored placement and indicators
 
-**State machine** — add to `SplatSceneState` rather than inventing a parallel
-store:
+Loading a splat now enters `placementState == .awaitingSurface`: the splat
+previews at a center-screen raycast hit while `PlacementOverlay` coaches the
+user, and a Place button commits it. Re-placing later is a menu action.
+
+**Anchoring is the drift fix.** A splat pinned to a fixed world transform does
+not move when ARKit refines its map, so it appears to slide relative to the
+room. `SurfaceProvider.makeAnchor(at:)` creates an `ARAnchor` and the renderer
+re-reads `anchorTransform(for:)` **every frame** — a cached copy reintroduces
+the drift. Composition is `anchor × T·R·S·R_upCal·T(-pivot)`, anchor outermost,
+so platform corrections apply to the whole splat.
+
+`SurfaceProvider` is a third ARKit-free seam alongside `PoseProvider` and
+`CameraFrameSource`. `SimulatedPoseProvider` adopts it with a synthetic floor at
+y = -1.5, which is why the entire placement flow, anchoring, and the gizmo are
+verifiable in the simulator. What that path *cannot* verify is the drift fix
+itself — a simulated world never drifts.
+
+Plane detection is off unless placement is active or the indicators are on, and
+`isSurfaceDetectionEnabled` genuinely re-runs the session config rather than
+hiding results. It re-runs **without** `.resetTracking`, or every placed anchor
+would be lost.
+
+`GizmoRenderer` draws axis bars, a drop line to the supporting plane, a ring
+where it lands, and plane outlines — a final `loadAction: .load` pass into the
+drawable, after splats and after the passthrough composite. No depth test: the
+indicators matter most when the splat is buried in geometry.
+
+**Original design sketch, mostly superseded:**
 
 ```
 .loading → .awaitingSurface → .placing(anchor) → .placed(anchor) → .adjusting
@@ -298,6 +324,31 @@ Constraints the visionOS path never has to think about:
   concrete visionOS cost we're currently paying.
 
 ---
+
+## Performance: what's actually available
+
+Measured falloff starts around 500k splats. Two facts from the 1.0.1 source
+determine what can be done about it:
+
+- **No early termination.** The fragment shaders have no transmittance cutoff
+  or alpha-saturation break — only a "behind the camera" cull in
+  `SplatProcessing.metal:159`. Every splat in view is rasterized and blended
+  however occluded it is. The reference 3DGS rasterizer *does* early-out; this
+  one doesn't. Adding it means editing package-resource shaders, i.e. vendoring
+  the dependency.
+- **No frustum culling anywhere.** But `setChunkEnabled(_:enabled:)` is public
+  (`SplatRenderer.swift:399`), so spatial chunking plus frustum/distance culling
+  is available **without** vendoring. That's the biggest win for a walk-through
+  viewer, where most of a scene is off-screen. Caveat to measure: chunk changes
+  invalidate the sort, so toggling must be hysteretic or it will thrash.
+
+**SOG does not help frame rate.** It's a storage format; the reader decodes to
+the same `SplatPoint` array, so per-frame cost is identical. It helps file size
+and load time only.
+
+Also note `useMultiStagePipeline` is `writeDepth && highQualityDepth`, and we
+pass `highQualityDepth: false` — so device and simulator now run the same
+single-stage path.
 
 ## visionOS audit
 

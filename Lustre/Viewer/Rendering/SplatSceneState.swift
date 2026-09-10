@@ -30,7 +30,27 @@ final class SplatSceneState {
         }
     }
 
+    /// Whether the splat has been committed to a spot in the world.
+    enum PlacementState: Equatable {
+        /// Following the crosshair, not yet committed. The splat previews at
+        /// the candidate location so you can see what you're about to place.
+        case awaitingSurface
+        case placed
+    }
+
     var loadState: LoadState = .empty
+
+    var placementState: PlacementState = .placed
+
+    /// The anchor the splat is attached to, if any. Anchoring is what keeps a
+    /// placed splat from drifting: the platform refines anchor transforms as
+    /// its map improves, and a fixed world transform doesn't get that
+    /// correction.
+    var anchorID: UUID?
+
+    /// Where the splat was committed, used when there's no anchor to consult
+    /// (no surface provider, or the anchor was dropped).
+    var placedTransform: simd_float4x4 = matrix_identity_float4x4
 
     // MARK: - Placement (user-controlled)
 
@@ -71,6 +91,12 @@ final class SplatSceneState {
     var fittedScale: Float = SplatScale.authored
 
     static let scaleRange = SplatScale.range
+
+    /// Splat count above which frame rate starts falling off on device,
+    /// measured on an iPhone. MetalSplatter has no frustum culling and no
+    /// early-out in its fragment shaders, so cost scales with every splat in
+    /// view regardless of occlusion.
+    static let performanceWarningSplatCount = 500_000
 
     /// Meters. The longest horizontal extent is fitted to this on load.
     ///
@@ -134,6 +160,9 @@ final class SplatSceneState {
 
     func clear() {
         loadState = .empty
+        placementState = .placed
+        anchorID = nil
+        placedTransform = matrix_identity_float4x4
         pivot = .zero
         fittedScale = SplatScale.authored
         resetPlacement()
