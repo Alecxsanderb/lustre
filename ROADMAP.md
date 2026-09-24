@@ -190,8 +190,8 @@ in the simulator.
 `ARKitPoseProvider` compiles but has never produced a pose, and the passthrough
 path's camera plumbing (`CVMetalTextureCache` against the real capture pool,
 `displayTransform`) has never seen a real frame; only the compositor math is
-verified, against a synthetic test pattern. Loading a real PLY/SPZ/`.splat` file
-is also still untested — only the procedural sample has reached the renderer.
+verified, against a synthetic test pattern. Real PLY files load (manually
+tested); SPZ and `.splat` loading is still untested.
 
 ---
 
@@ -373,34 +373,3 @@ is uploaded, even a minimal one.
 - iPad-specific UI — universal binary is fine, no custom layouts
 - AR Quick Look integration for sharing with non-Lustre users
 
----
-
-## Status snapshot
-
-(Update this section as work progresses. Easy block for fresh chats
-to see where things stand.)
-
-- **Repo:** created, public, MIT licensed
-- **App Store name:** Lustre (reservation: TBD)
-- **Bundle ID:** `com.alecborer.Lustre`
-- **Xcode project:** `Lustre.xcodeproj` at the repo root
-- **Minimum iOS:** 18.0 — forced by MetalSplatter, which has no version that
-  supports iOS 16 (1.0.x needs 18, the oldest tag needs 17)
-- **Viewer:** MetalSplatter integrated; renders in the simulator. AR path
-  unverified (needs a device).
-- **Other features:** planned, not started
-- **Hardware:** development on MacBook Air M4 16GB; iPhone target TBD.
-  Note MetalSplatter `fatalError`s on x86_64, so an Intel Mac can't run this.
-
----
-
-## Notes for future chats
-
-- The scaffold's pose abstraction (`PoseProvider`) is the seam for
-  testing without a device. Two implementations: `ARKitPoseProvider`
-  on device, `SimulatedPoseProvider` with joysticks on simulator.
-- MetalSplatter is the splat rendering library — integration steps
-  are in `Viewer/INTEGRATION.md` (or wherever you placed it).
-- Minimum iOS version: 16.0
-- Reference apps in the same space: Scaniverse, Polycam, RadianceKit
-  (macOS only), Gaussian SplatKing
