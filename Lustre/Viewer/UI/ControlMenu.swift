@@ -23,6 +23,9 @@ struct ControlMenu: View {
     /// this is where the notches get their units.
     var rulerDescription: (minor: String, major: String)?
     var cullingSummary: (visibleChunks: Int, totalChunks: Int, visibleSplats: Int)?
+    /// Camera-to-world, read per tap so nudges follow the direction the user
+    /// is facing, matching the drag gestures.
+    var cameraTransform: () -> simd_float4x4
 
     var onRecenter: () -> Void
     var onBackgroundChange: (ViewerUIState.Background) -> Void
@@ -247,12 +250,12 @@ struct ControlMenu: View {
             }
 
             HStack(spacing: 6) {
-                nudgeButton("arrow.left", axis: SIMD3(-1, 0, 0))
-                nudgeButton("arrow.right", axis: SIMD3(1, 0, 0))
-                nudgeButton("arrow.up", axis: SIMD3(0, 1, 0))
-                nudgeButton("arrow.down", axis: SIMD3(0, -1, 0))
-                nudgeButton("arrow.up.forward", axis: SIMD3(0, 0, -1))
-                nudgeButton("arrow.down.backward", axis: SIMD3(0, 0, 1))
+                nudgeButton("arrow.left", label: "Nudge left", right: -1)
+                nudgeButton("arrow.right", label: "Nudge right", right: 1)
+                nudgeButton("arrow.up", label: "Nudge up", up: 1)
+                nudgeButton("arrow.down", label: "Nudge down", up: -1)
+                nudgeButton("arrow.up.forward", label: "Nudge away", forward: 1)
+                nudgeButton("arrow.down.backward", label: "Nudge closer", forward: -1)
             }
             .buttonStyle(.bordered)
 
@@ -265,13 +268,20 @@ struct ControlMenu: View {
         }
     }
 
-    private func nudgeButton(_ systemImage: String, axis: SIMD3<Float>) -> some View {
+    /// Amounts are in steps along the camera-relative basis, so "left" means
+    /// the user's left wherever they're facing. The x/y/z readout stays in
+    /// world axes because that's what the translation actually stores.
+    private func nudgeButton(_ systemImage: String, label: String,
+                             right: Float = 0, up: Float = 0, forward: Float = 0) -> some View {
         Button {
-            sceneState.translation += axis * Self.nudgeStep
+            let basis = CameraRelativeBasis(cameraTransform: cameraTransform())
+            sceneState.translation += basis.worldDelta(right: right * Self.nudgeStep,
+                                                       up: up * Self.nudgeStep,
+                                                       forward: forward * Self.nudgeStep)
         } label: {
             Image(systemName: systemImage).font(.footnote)
         }
-        .accessibilityLabel("Nudge \(systemImage)")
+        .accessibilityLabel(label)
     }
 
     // MARK: - Display

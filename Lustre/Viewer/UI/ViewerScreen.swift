@@ -56,6 +56,7 @@ struct ViewerScreen: View {
                                 isOcclusionAvailable: model.isOcclusionAvailable,
                                 rulerDescription: model.rulerDescription,
                                 cullingSummary: model.cullingSummary,
+                                cameraTransform: { model.cameraTransform },
                                 onRecenter: model.recenter,
                                 onBackgroundChange: model.setBackground,
                                 onReplace: model.beginPlacement,
