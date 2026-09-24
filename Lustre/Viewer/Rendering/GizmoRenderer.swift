@@ -177,13 +177,46 @@ final class GizmoRenderer {
         }
     }
 
-    /// Highest plane below the splat, or nil if it's below all of them.
+    /// Highest plane below the splat whose outline contains it horizontally.
+    ///
+    /// If none does, falls back to the highest plane below regardless of
+    /// extent: ARKit planes start small and grow, and a drop line that
+    /// vanishes whenever the splat drifts past a partial floor edge is worse
+    /// than one that lands slightly off the detected patch.
     private func supportingPlaneHeight(below point: SIMD3<Float>,
                                        planes: [DetectedPlane]) -> Float? {
-        planes
-            .map { $0.transform.columns.3.y }
-            .filter { $0 < point.y }
-            .max()
+        var containing: Float?
+        var anyBelow: Float?
+        for plane in planes {
+            let height = plane.transform.columns.3.y
+            guard height < point.y else { continue }
+            anyBelow = max(anyBelow ?? height, height)
+            let local = (simd_inverse(plane.transform) * SIMD4<Float>(point, 1)).xyz
+            if Self.convexOutline(plane.outline, contains: SIMD2(local.x, local.z)) {
+                containing = max(containing ?? height, height)
+            }
+        }
+        return containing ?? anyBelow
+    }
+
+    /// `outline` is convex (ARKit's boundary is a hull; the fallback is a
+    /// rectangle), so the point is inside when it sits on the same side of
+    /// every edge. Checking for a consistent sign rather than a specific one
+    /// keeps this independent of winding order.
+    private static func convexOutline(_ outline: [SIMD2<Float>], contains point: SIMD2<Float>) -> Bool {
+        guard outline.count >= 3 else { return false }
+        var sawPositive = false
+        var sawNegative = false
+        for index in outline.indices {
+            let a = outline[index]
+            let b = outline[(index + 1) % outline.count]
+            let edge = b - a
+            let toPoint = point - a
+            let cross = edge.x * toPoint.y - edge.y * toPoint.x
+            if cross > 0 { sawPositive = true } else if cross < 0 { sawNegative = true }
+            if sawPositive && sawNegative { return false }
+        }
+        return true
     }
 
     /// Notches at fixed real-world intervals, every `majorEvery`-th one longer.
