@@ -194,16 +194,4 @@ final class SplatSceneState {
     func useAuthoredScale() {
         scale = SplatScale.authored
     }
-
-    func clear() {
-        loadState = .empty
-        placementState = .placed
-        anchorID = nil
-        placedTransform = matrix_identity_float4x4
-        pivot = .zero
-        fittedScale = SplatScale.authored
-        assetExtent = .zero
-        sourceSplatCount = nil
-        resetPlacement()
-    }
 }

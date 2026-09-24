@@ -5,8 +5,6 @@
 //  Six-plane view frustum extracted from a view-projection matrix, plus an
 //  axis-aligned box test. Used to skip splat chunks that can't be on screen.
 //
-//  In Core because Capture's coverage map will want the same test.
-//
 
 import Foundation
 import simd

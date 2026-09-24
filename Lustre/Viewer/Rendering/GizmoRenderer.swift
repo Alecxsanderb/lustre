@@ -40,14 +40,14 @@ final class GizmoRenderer {
         static let majorTickFraction: Float = 0.42
     }
 
-    private let device: MTLDevice
     private let pipelineState: MTLRenderPipelineState
-    private var vertexBuffers: [MTLBuffer] = []
-    private var bufferIndex = 0
+    private var vertexRing: VertexBufferRing<Vertex>
     private var vertices: [Vertex] = []
 
     init?(device: MTLDevice, colorFormat: MTLPixelFormat) {
-        self.device = device
+        vertexRing = VertexBufferRing(device: device,
+                                      capacity: Constants.maximumVertices,
+                                      label: "Gizmo vertices")
         do {
             let library = try device.makeDefaultLibrary(bundle: .main)
 
@@ -101,7 +101,7 @@ final class GizmoRenderer {
                       ruler: ruler,
                       planes: planes,
                       isPlacing: isPlacing)
-        guard !vertices.isEmpty, let buffer = nextVertexBuffer() else { return }
+        guard !vertices.isEmpty, let buffer = vertexRing.next(filledWith: vertices) else { return }
 
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = target
@@ -292,34 +292,5 @@ final class GizmoRenderer {
 
     private func mix(_ a: SIMD3<Float>, _ b: SIMD3<Float>, t: Float) -> SIMD3<Float> {
         a + (b - a) * t
-    }
-
-    /// One buffer per in-flight frame.
-    ///
-    /// A single shared buffer is a CPU/GPU race: `draw(in:)` allows up to
-    /// `SplatRenderer.framesInFlight` command buffers outstanding, and Metal's
-    /// hazard tracking doesn't stop the CPU from overwriting a `.storageModeShared`
-    /// buffer that an earlier frame's GPU work is still reading. Cycling means a
-    /// buffer is only rewritten once the frame that used it has completed.
-    private func nextVertexBuffer() -> MTLBuffer? {
-        if vertexBuffers.isEmpty {
-            let length = MemoryLayout<Vertex>.stride * Constants.maximumVertices
-            vertexBuffers = (0..<SplatRenderer.framesInFlight).compactMap { index in
-                let buffer = device.makeBuffer(length: length, options: .storageModeShared)
-                buffer?.label = "Gizmo vertices \(index)"
-                return buffer
-            }
-            guard vertexBuffers.count == SplatRenderer.framesInFlight else {
-                vertexBuffers.removeAll()
-                return nil
-            }
-        }
-
-        bufferIndex = (bufferIndex + 1) % vertexBuffers.count
-        let buffer = vertexBuffers[bufferIndex]
-        vertices.withUnsafeBytes { source in
-            buffer.contents().copyMemory(from: source.baseAddress!, byteCount: source.count)
-        }
-        return buffer
     }
 }

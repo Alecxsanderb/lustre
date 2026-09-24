@@ -30,15 +30,15 @@ final class OccluderRenderer {
         static let maximumVertices = 8192
     }
 
-    private let device: MTLDevice
     private let pipelineState: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
-    private var vertexBuffers: [MTLBuffer] = []
-    private var bufferIndex = 0
+    private var vertexRing: VertexBufferRing<SIMD3<Float>>
     private var vertices: [SIMD3<Float>] = []
 
     init?(device: MTLDevice, depthFormat: MTLPixelFormat) {
-        self.device = device
+        vertexRing = VertexBufferRing(device: device,
+                                      capacity: Constants.maximumVertices,
+                                      label: "Occluder vertices")
         do {
             let library = try device.makeDefaultLibrary(bundle: .main)
 
@@ -82,7 +82,7 @@ final class OccluderRenderer {
               into depthTexture: MTLTexture,
               commandBuffer: MTLCommandBuffer) -> Bool {
         buildGeometry(planes: planes)
-        guard !vertices.isEmpty, let buffer = nextVertexBuffer() else { return false }
+        guard !vertices.isEmpty, let buffer = vertexRing.next(filledWith: vertices) else { return false }
 
         let descriptor = MTLRenderPassDescriptor()
         descriptor.depthAttachment.texture = depthTexture
@@ -134,34 +134,5 @@ final class OccluderRenderer {
 
     private func world(_ local: SIMD2<Float>, on plane: DetectedPlane) -> SIMD3<Float> {
         (plane.transform * SIMD4<Float>(local.x, 0, local.y, 1)).xyz
-    }
-
-    /// One buffer per in-flight frame.
-    ///
-    /// A single shared buffer is a CPU/GPU race: `draw(in:)` allows up to
-    /// `SplatRenderer.framesInFlight` command buffers outstanding, and Metal's
-    /// hazard tracking doesn't stop the CPU from overwriting a `.storageModeShared`
-    /// buffer that an earlier frame's GPU work is still reading. Cycling means a
-    /// buffer is only rewritten once the frame that used it has completed.
-    private func nextVertexBuffer() -> MTLBuffer? {
-        if vertexBuffers.isEmpty {
-            let length = MemoryLayout<SIMD3<Float>>.stride * Constants.maximumVertices
-            vertexBuffers = (0..<SplatRenderer.framesInFlight).compactMap { index in
-                let buffer = device.makeBuffer(length: length, options: .storageModeShared)
-                buffer?.label = "Occluder vertices \(index)"
-                return buffer
-            }
-            guard vertexBuffers.count == SplatRenderer.framesInFlight else {
-                vertexBuffers.removeAll()
-                return nil
-            }
-        }
-
-        bufferIndex = (bufferIndex + 1) % vertexBuffers.count
-        let buffer = vertexBuffers[bufferIndex]
-        vertices.withUnsafeBytes { source in
-            buffer.contents().copyMemory(from: source.baseAddress!, byteCount: source.count)
-        }
-        return buffer
     }
 }
