@@ -54,6 +54,11 @@ final class SplatChunkCuller {
     private var lastCameraForward: SIMD3<Float>?
     private var needsEvaluation = false
     private var isApplying = false
+    /// Bumped on every scene change so an apply task from the previous scene
+    /// can't clear `isApplying` while the new scene's own apply is in flight.
+    /// (Its `setChunkEnabled` calls are harmless: MetalSplatter never reuses
+    /// chunk IDs, and an unknown ID is a no-op.)
+    private var generation = 0
 
     /// Nothing to cull with a single chunk, and the readout would be noise.
     var isActive: Bool { entries.count > 1 }
@@ -62,34 +67,50 @@ final class SplatChunkCuller {
     private(set) var visibleChunkCount: Int = 0
     private(set) var visibleSplatCount: Int = 0
 
-    func reset(entries: [Entry]) {
+    /// - Parameter sceneBounds: the robust bounds the chunk grid was laid out
+    ///   from. The margin and movement thresholds scale with the scene, and
+    ///   the union of raw chunk boxes would let one floater inflate them for
+    ///   everything.
+    func reset(entries: [Entry], sceneBounds: SplatBounds?) {
+        beginNewScene()
         self.entries = entries
         visibleChunkCount = entries.count
         visibleSplatCount = entries.reduce(0) { $0 + $1.splatCount }
-
-        if let first = entries.first {
-            var minimum = first.minimum
-            var maximum = first.maximum
-            for entry in entries.dropFirst() {
-                minimum = simd_min(minimum, entry.minimum)
-                maximum = simd_max(maximum, entry.maximum)
-            }
-            sceneDiagonal = simd_length(maximum - minimum)
-        } else {
-            sceneDiagonal = 0
-        }
-
-        lastCameraPosition = nil
-        lastCameraForward = nil
+        sceneDiagonal = Self.diagonal(sceneBounds: sceneBounds, entries: entries)
         needsEvaluation = true
     }
 
     func removeAll() {
+        beginNewScene()
         entries.removeAll()
         sceneDiagonal = 0
         visibleChunkCount = 0
         visibleSplatCount = 0
         needsEvaluation = false
+    }
+
+    private func beginNewScene() {
+        generation &+= 1
+        isApplying = false
+        lastCameraPosition = nil
+        lastCameraForward = nil
+    }
+
+    /// Falls back to the union of chunk boxes only when there are no usable
+    /// robust bounds — e.g. too few finite points to compute them.
+    private static func diagonal(sceneBounds: SplatBounds?, entries: [Entry]) -> Float {
+        if let sceneBounds {
+            let diagonal = simd_length(sceneBounds.extent)
+            if diagonal.isFinite, diagonal > 0 { return diagonal }
+        }
+        guard let first = entries.first else { return 0 }
+        var minimum = first.minimum
+        var maximum = first.maximum
+        for entry in entries.dropFirst() {
+            minimum = simd_min(minimum, entry.minimum)
+            maximum = simd_max(maximum, entry.maximum)
+        }
+        return simd_length(maximum - minimum)
     }
 
     /// - Parameters:
@@ -161,6 +182,7 @@ final class SplatChunkCuller {
     private func apply(_ changes: [(id: ChunkID, enabled: Bool)],
                        to renderer: MetalSplatter.SplatRenderer) {
         isApplying = true
+        let applyGeneration = generation
         let payload = changes.map { (id: $0.id, enabled: $0.enabled) }
         Task { [weak self] in
             await renderer.withChunkAccess {
@@ -168,7 +190,8 @@ final class SplatChunkCuller {
                     await renderer.setChunkEnabled(change.id, enabled: change.enabled)
                 }
             }
-            self?.isApplying = false
+            guard let self, self.generation == applyGeneration else { return }
+            self.isApplying = false
         }
     }
 }

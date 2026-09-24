@@ -221,7 +221,7 @@ final class SplatRenderer: NSObject, MTKViewDelegate {
             }
             return (entries, loaded)
         }
-        culler.reset(entries: entries)
+        culler.reset(entries: entries, sceneBounds: bounds)
         splatRenderer = renderer
         Self.log.info("Loaded \(loaded) splats in \(built.count) chunk(s)")
         return loaded

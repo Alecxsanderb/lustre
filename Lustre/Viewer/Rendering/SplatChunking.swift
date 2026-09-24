@@ -202,9 +202,18 @@ nonisolated enum SplatChunking {
         return divisions
     }
 
+    /// Gaussians reach visibly out to about three standard deviations, and the
+    /// linear scale is one standard deviation along each principal axis.
+    private static let extentSigmas: Float = 3
+
     /// True min/max of the chunk's own members, not the grid cell — a cell
     /// holding one far-flung floater must report a box that contains it, or
     /// culling would make that splat disappear.
+    ///
+    /// Each point is padded by its footprint, not just its center: a large
+    /// splat whose center is off screen can still cover the edge of it. The
+    /// largest axis stands in for the rotated ellipsoid, which is conservative
+    /// without touching the quaternion.
     private static func boundingBox(of points: [SplatPoint]) -> (minimum: SIMD3<Float>, maximum: SIMD3<Float>) {
         var minimum = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
         var maximum = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
@@ -212,8 +221,12 @@ nonisolated enum SplatChunking {
         for point in points {
             let p = point.position
             guard p.x.isFinite, p.y.isFinite, p.z.isFinite else { continue }
-            minimum = simd_min(minimum, p)
-            maximum = simd_max(maximum, p)
+            let radius = point.scale.asLinearFloat.max() * extentSigmas
+            // A NaN or infinite scale would poison the whole chunk box; keep
+            // the center rather than drop the point.
+            let pad = radius.isFinite && radius > 0 ? radius : 0
+            minimum = simd_min(minimum, p - pad)
+            maximum = simd_max(maximum, p + pad)
             found = true
         }
         guard found else { return (.zero, .zero) }
