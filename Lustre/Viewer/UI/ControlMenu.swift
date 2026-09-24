@@ -225,12 +225,20 @@ struct ControlMenu: View {
             HStack {
                 Text(title).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(Int(value.wrappedValue * 180 / .pi))°")
+                Text(Self.formattedDegrees(value.wrappedValue))
                     .font(.caption.monospacedDigit())
             }
             Slider(value: value, in: -Float.pi...Float.pi)
                 .accessibilityLabel(title)
         }
+    }
+
+    /// `Int(_:)` traps on NaN or infinity, and a bad transform in a loaded
+    /// file shouldn't take the app down with it.
+    private static func formattedDegrees(_ radians: Float) -> String {
+        let degrees = radians * 180 / .pi
+        guard degrees.isFinite else { return "—" }
+        return "\(Int(degrees.rounded(.towardZero)))°"
     }
 
     // MARK: - Position
