@@ -15,6 +15,7 @@ import SwiftUI
 struct ViewerScreen: View {
     @State private var model = ViewerModel()
     @State private var isImporting = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -108,6 +109,16 @@ struct ViewerScreen: View {
         }
         .onDisappear {
             model.onDisappear()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: model.onEnterBackground()
+            case .active: model.onBecomeActive()
+            // Inactive is transient (Control Center, the app switcher peek);
+            // tearing down tracking for it would cost a relocalization.
+            case .inactive: break
+            @unknown default: break
+            }
         }
     }
 }

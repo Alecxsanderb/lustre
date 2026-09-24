@@ -62,6 +62,12 @@ final class ViewerModel {
     /// so this doesn't rely on the view layer getting it right.
     private var isLoading = false
 
+    /// Tracked here rather than asked of the provider so the scene-phase path
+    /// works the same through the `PoseProvider` protocol for every
+    /// implementation, and never starts one twice.
+    private var isViewerVisible = false
+    private var isPoseProviderRunning = false
+
     init() {
         // Device first: `ARKitPoseProvider` needs it for its texture cache.
         let device = MTLCreateSystemDefaultDevice()
@@ -245,7 +251,8 @@ final class ViewerModel {
     }
 
     func onAppear() {
-        poseProvider.start()
+        isViewerVisible = true
+        startPoseProvider()
         observeMemoryWarnings()
         // Apply the defaults; nothing has pushed them to the renderer yet.
         renderer?.setPassthroughEnabled(uiState.background == .camera)
@@ -255,11 +262,37 @@ final class ViewerModel {
     }
 
     func onDisappear() {
-        poseProvider.stop()
+        isViewerVisible = false
+        stopPoseProvider()
         if let memoryWarningObserver {
             NotificationCenter.default.removeObserver(memoryWarningObserver)
             self.memoryWarningObserver = nil
         }
+    }
+
+    /// Releases the camera and tracking while the app is backgrounded rather
+    /// than leaving it to the platform.
+    func onEnterBackground() {
+        stopPoseProvider()
+    }
+
+    /// Only restarts if the Viewer is actually on screen; a foregrounded app
+    /// showing some other screen shouldn't power up the camera.
+    func onBecomeActive() {
+        guard isViewerVisible else { return }
+        startPoseProvider()
+    }
+
+    private func startPoseProvider() {
+        guard !isPoseProviderRunning else { return }
+        poseProvider.start()
+        isPoseProviderRunning = true
+    }
+
+    private func stopPoseProvider() {
+        guard isPoseProviderRunning else { return }
+        poseProvider.stop()
+        isPoseProviderRunning = false
     }
 
     func recenter() {

@@ -55,6 +55,7 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
 
     private var latestCamera: ARCamera?
     private var isRunning = false
+    private var hasRunSession = false
 
     /// Backing storage for `SurfaceProvider` (extensions can't add stored
     /// properties).
@@ -70,7 +71,12 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravity
         configuration.planeDetection = detectsSurfaces ? [.horizontal] : []
-        session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        // Reset only on the first run. A restart after `stop()` (the app
+        // coming back from the background) must keep the map and the placed
+        // splat's anchor, or the splat would jump to wherever the phone is.
+        let options: ARSession.RunOptions = hasRunSession ? [] : [.resetTracking, .removeExistingAnchors]
+        session.run(configuration, options: options)
+        hasRunSession = true
         isRunning = true
         statusMessage = "Move the phone slowly to start tracking."
     }
