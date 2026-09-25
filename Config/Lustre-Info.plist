@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated Info.plist. Only keys that have no
+  INFOPLIST_KEY_* build setting belong here. Kept outside Lustre/ so the
+  synchronized folder doesn't also copy it in as a bundle resource.
+-->
+<plist version="1.0">
+<dict>
+	<!-- Exposes Documents/ (the splat library) in Files as "Lustre". -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+</dict>
+</plist>
