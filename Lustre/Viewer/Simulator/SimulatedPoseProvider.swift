@@ -15,7 +15,6 @@ import simd
 final class SimulatedPoseProvider: PoseProvider {
 
     private enum Constants {
-        static let metersPerSecond: Float = 1.8
         static let radiansPerSecond: Float = 1.6
         /// Stop just short of straight up/down; at exactly ±90° yaw becomes
         /// ambiguous and the view snaps.
@@ -28,6 +27,10 @@ final class SimulatedPoseProvider: PoseProvider {
 
     /// Right stick: x yaws, y pitches.
     var lookInput: SIMD2<Float> = .zero
+
+    /// Joystick translation speed. Set from `AppPreferences` by the model;
+    /// deliberately not on `PoseProvider`, since a device walks at walking pace.
+    var metersPerSecond: Float = AppPreferences.defaults.joystickSpeed
 
     var verticalFieldOfView: Float = 65 * .pi / 180
 
@@ -65,7 +68,7 @@ final class SimulatedPoseProvider: PoseProvider {
             let forward = SIMD3<Float>(-sin(yaw), 0, -cos(yaw))
             let right = SIMD3<Float>(cos(yaw), 0, -sin(yaw))
             let delta = (forward * moveInput.y + right * moveInput.x)
-                * Constants.metersPerSecond * dt
+                * metersPerSecond * dt
             position += delta
         }
 

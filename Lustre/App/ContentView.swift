@@ -33,7 +33,8 @@ struct ContentView: View {
                     case .library:
                         LibraryView(library: library, onOpen: open, onOpenSample: openSample)
                     case .viewer(let content):
-                        ViewerScreen(content: content)
+                        ViewerScreen(content: content,
+                                     preferences: AppPreferences(reading: .standard))
                     }
                 }
         }

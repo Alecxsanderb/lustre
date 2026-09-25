@@ -49,6 +49,9 @@ final class ViewerModel {
     private var surfaceProvider: (any SurfaceProvider)?
 
     private var memoryWarningObserver: (any NSObjectProtocol)?
+
+    /// Only file splats honor it; the sample room is authored in meters.
+    private var initialSize = AppPreferences.defaults.initialSize
     private var lastContent: ViewerContent?
 
     /// Guards against overlapping loads. The UI already disables the import
@@ -121,6 +124,13 @@ final class ViewerModel {
         testPatternSource = pattern
         renderer.setCameraFrameSource(pattern)
         #endif
+    }
+
+    /// Takes effect on the next load. Kept out of `init` so the model doesn't
+    /// need preferences to exist, and the pose provider stays unaware of them.
+    func apply(_ preferences: AppPreferences) {
+        initialSize = preferences.initialSize
+        simulatedProvider?.metersPerSecond = preferences.joystickSpeed
     }
 
     var statusMessage: String? { poseProvider.statusMessage }
@@ -404,16 +414,30 @@ final class ViewerModel {
             // on the bounding box would shift a deliberately placed scene, and
             // rescaling a metric one is just wrong.
             sceneState.pivot = .zero
-            sceneState.fittedScale = SplatScale.authored
         } else {
             // SfM output: the origin can sit anywhere relative to the points and
             // the units are arbitrary, so derive both. Pivot is in raw asset
             // coordinates, which is what the model matrix subtracts first —
             // before the up-calibration flip.
             sceneState.pivot = bounds?.center ?? .zero
-            sceneState.fittedScale = bounds?.fittedScale(targetExtent: SplatSceneState.autoFitExtent)
-                ?? SplatScale.authored
         }
+        let scales = Self.initialScales(for: bounds,
+                                        initialSize: initialSize,
+                                        hasAuthoredPlacement: hasAuthoredPlacement)
+        sceneState.fittedScale = scales.fitted
+        sceneState.initialScale = scales.initial
         sceneState.resetPlacement()
+    }
+
+    /// `fitted` is what Fit returns to; `initial` is what the splat opens at
+    /// and Reset returns to. Life size opens at authored scale but still gets
+    /// a fitted scale, so Fit remains a way back from a capture in odd units.
+    nonisolated static func initialScales(for bounds: SplatBounds?,
+                                          initialSize: AppPreferences.InitialSize,
+                                          hasAuthoredPlacement: Bool) -> (fitted: Float, initial: Float) {
+        guard !hasAuthoredPlacement else { return (SplatScale.authored, SplatScale.authored) }
+        let target = initialSize.fitExtent ?? SplatSceneState.autoFitExtent
+        let fitted = bounds?.fittedScale(targetExtent: target) ?? SplatScale.authored
+        return (fitted, initialSize.fitExtent == nil ? SplatScale.authored : fitted)
     }
 }

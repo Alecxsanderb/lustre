@@ -90,6 +90,10 @@ final class SplatSceneState {
     /// it after the user has zoomed away.
     var fittedScale: Float = SplatScale.authored
 
+    /// What the splat opened at and what Reset returns to. Usually
+    /// `fittedScale`; authored when the user's initial size is Life size.
+    var initialScale: Float = SplatScale.authored
+
     /// The splat's own size in asset units, from the robust bounds at load.
     /// Multiplied by `scale`, this is how big it actually is in the room, which
     /// is what sizes the measuring axes.
@@ -119,12 +123,14 @@ final class SplatSceneState {
     /// view regardless of occlusion.
     static let performanceWarningSplatCount = 500_000
 
-    /// Meters. The longest horizontal extent is fitted to this on load.
+    /// Meters. The longest horizontal extent is fitted to this on load unless
+    /// the user picked another initial size, and by Fit when their initial
+    /// size is Life size (which has no extent of its own).
     ///
     /// Dollhouse-sized rather than room-sized on purpose: a splat that's too
     /// small is obviously there and can be scaled up, whereas one that's too
     /// large puts the camera inside geometry and looks like a failed load.
-    static let autoFitExtent: Float = 1.5
+    nonisolated static let autoFitExtent: Float = 1.5
 
     /// Half-length of one measuring axis, in meters of real space.
     ///
@@ -174,10 +180,10 @@ final class SplatSceneState {
 
     // MARK: - Mutation
 
-    /// Returns placement to defaults, keeping asset metadata (`pivot`,
-    /// `appliesUpCalibration`, `fittedScale`) intact.
+    /// Returns placement to how the splat opened, keeping asset metadata
+    /// (`pivot`, `appliesUpCalibration`, `fittedScale`, `initialScale`) intact.
     func resetPlacement() {
-        scale = fittedScale
+        scale = initialScale
         translation = .zero
         yaw = 0
         pitch = 0

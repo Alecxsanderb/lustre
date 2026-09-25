@@ -14,6 +14,9 @@ import SwiftUI
 
 struct ViewerScreen: View {
     let content: ViewerContent
+    /// A snapshot taken when the Viewer opens; Settings can't be reached from
+    /// here, so there's nothing to observe.
+    let preferences: AppPreferences
 
     @State private var model = ViewerModel()
     @Environment(\.scenePhase) private var scenePhase
@@ -82,6 +85,7 @@ struct ViewerScreen: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            model.apply(preferences)
             model.onAppear()
             if model.sceneState.loadState == .empty {
                 await model.load(content)
@@ -112,6 +116,6 @@ struct ViewerScreen: View {
 
 #Preview {
     NavigationStack {
-        ViewerScreen(content: .sample)
+        ViewerScreen(content: .sample, preferences: .defaults)
     }
 }

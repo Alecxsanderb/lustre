@@ -226,9 +226,9 @@ T(translation) · R_user · S(scale) · R_upCalibration · T(-pivot)
 
 `pivot` comes from `SplatBounds.robust` — 2nd–98th percentile per axis over a
 strided subsample, *not* raw min/max, because real PLYs carry far-flung floater
-splats that inflate an AABB by orders of magnitude. `pivot` and `fittedScale`
-are asset metadata, set at load and deliberately **not** cleared by
-`resetPlacement()`.
+splats that inflate an AABB by orders of magnitude. `pivot`, `fittedScale`,
+and `initialScale` are asset metadata, set at load and deliberately **not**
+cleared by `resetPlacement()`, which returns `scale` to `initialScale`.
 
 Both corrections are gated on `hasAuthoredPlacement`. Files get them; the
 procedural sample doesn't, because its origin and its metres are deliberate —
@@ -237,7 +237,9 @@ placed. ARKit-derived captures will want the same exemption.
 
 Scale is `SplatScale`: logarithmic 0.001–1000 with 1.0 still meaning "as
 authored", magnitude-aware formatting, and auto-fit seeding the longest
-horizontal extent to 1.5 m. Dollhouse-first is deliberate — too small is
+horizontal extent to the user's Initial size (`AppPreferences`, applied by
+`ViewerModel.apply` before load): 0.5 / 1.5 (default) / 4 m, or Life size,
+which opens at authored scale while Fit still fits to 1.5 m. Dollhouse-first is deliberate — too small is
 obviously present and recoverable, too large puts the camera inside geometry and
 reads as a failed load.
 
