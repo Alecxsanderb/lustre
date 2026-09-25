@@ -9,7 +9,7 @@ long-term history is git. Replace entries, don't append.
   2026-09-24). Project is at 1.0 (1); build number not confirmed.
 
 ## Current focus
-ROADMAP Build order **step 2 (Library + Home) is implemented** (branch `library-home`),
+ROADMAP Build order **step 2 (Library + Home) is implemented and merged to `main`**,
 and verified in the simulator. Next is step 3 (Settings), once step 2 has been
 run on device.
 
@@ -80,7 +80,7 @@ run on device.
   with a multi-million-splat capture.
 
 ## Next up
-0. Merge `library-home`, run it on device (TestFlight): import from Files/iCloud,
+0. Run step 2 on device (TestFlight): import from Files/iCloud,
    Share sheet, open a large capture from the Library.
 1. Run the review fixes on device: nudge arrows, drop line on
    table vs floor, background then resume with a placed splat, a large
