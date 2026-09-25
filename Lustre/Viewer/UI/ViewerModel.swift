@@ -28,11 +28,6 @@ final class ViewerModel {
     /// aren't retained — a second copy of a multi-million-point capture is the
     /// one allocation an iPhone can't spare — so re-reading is the only way
     /// back to a different budget.
-    private enum LoadSource {
-        case sample
-        case file(URL)
-    }
-
     let sceneState = SplatSceneState()
     let uiState = ViewerUIState()
     let poseProvider: any PoseProvider
@@ -54,7 +49,7 @@ final class ViewerModel {
     private var surfaceProvider: (any SurfaceProvider)?
 
     private var memoryWarningObserver: (any NSObjectProtocol)?
-    private var lastLoadSource: LoadSource?
+    private var lastContent: ViewerContent?
 
     /// Guards against overlapping loads. The UI already disables the import
     /// button and the quality picker while loading, but two concurrent loads
@@ -325,8 +320,15 @@ final class ViewerModel {
 
     // MARK: - Loading
 
-    func loadSample() async {
-        lastLoadSource = .sample
+    func load(_ content: ViewerContent) async {
+        switch content {
+        case .sample: await loadSample()
+        case .file(let url, let name): await load(url: url, name: name)
+        }
+    }
+
+    private func loadSample() async {
+        lastContent = .sample
         // Authored Y-up in our own coordinates at a deliberate origin and in
         // real meters, so it skips the flip, the pivot, and the auto-fit that
         // real 3DGS captures all need.
@@ -335,11 +337,11 @@ final class ViewerModel {
         }
     }
 
-    func load(url: URL) async {
-        lastLoadSource = .file(url)
+    private func load(url: URL, name: String) async {
+        lastContent = .file(url, name: name)
         // SfM output: arbitrary frame, arbitrary origin, arbitrary scale, so
         // every correction applies.
-        await load(name: url.lastPathComponent, appliesUpCalibration: true, hasAuthoredPlacement: false) {
+        await load(name: name, appliesUpCalibration: true, hasAuthoredPlacement: false) {
             try await SplatFileIO.loadPoints(from: url)
         }
     }
@@ -349,11 +351,7 @@ final class ViewerModel {
     func setQuality(_ quality: SplatQuality) async {
         guard quality != uiState.quality else { return }
         uiState.quality = quality
-        switch lastLoadSource {
-        case .sample: await loadSample()
-        case .file(let url): await load(url: url)
-        case nil: break
-        }
+        if let lastContent { await load(lastContent) }
     }
 
     private func load(name: String,

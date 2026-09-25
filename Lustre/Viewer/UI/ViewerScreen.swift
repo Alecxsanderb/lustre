@@ -13,8 +13,9 @@
 import SwiftUI
 
 struct ViewerScreen: View {
+    let content: ViewerContent
+
     @State private var model = ViewerModel()
-    @State private var isImporting = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -78,33 +79,12 @@ struct ViewerScreen: View {
                                  onPlace: model.confirmPlacement)
             }
         }
-        .navigationTitle("Viewer")
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    isImporting = true
-                } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                }
-                .disabled(model.sceneState.loadState.isLoading)
-            }
-        }
-        .fileImporter(isPresented: $isImporting,
-                      allowedContentTypes: SplatFileIO.importableContentTypes) { result in
-            switch result {
-            case .success(let url):
-                Task { await model.load(url: url) }
-            case .failure(let error):
-                model.sceneState.loadState = .failed(error.localizedDescription)
-            }
-        }
         .task {
             model.onAppear()
-            // Something on screen from the first frame, so the viewer is never
-            // a blank rectangle. Replaced by the Library in build order step 2.
             if model.sceneState.loadState == .empty {
-                await model.loadSample()
+                await model.load(content)
             }
         }
         .onDisappear {
@@ -121,10 +101,17 @@ struct ViewerScreen: View {
             }
         }
     }
+
+    private var title: String {
+        switch content {
+        case .sample: "Sample Room"
+        case .file(_, let name): name
+        }
+    }
 }
 
 #Preview {
     NavigationStack {
-        ViewerScreen()
+        ViewerScreen(content: .sample)
     }
 }

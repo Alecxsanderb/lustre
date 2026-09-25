@@ -9,9 +9,12 @@ import SwiftUI
 
 @main
 struct LustreApp: App {
+    /// One library for the app's lifetime; Home and Library both read it.
+    @State private var library = SplatLibrary()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(library: library)
         }
     }
 }

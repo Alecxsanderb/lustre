@@ -4,57 +4,55 @@
 //
 //  Created by Alec Borer on 6/24/26.
 //
-//  Navigation root. Home replaces this as the landing screen in build order
-//  step 2; for now it's the shortest path into the Viewer.
+//  Navigation root and the only place features meet. Home and Library report
+//  what the user picked through callbacks; this maps those onto routes and
+//  builds the destination screens, so no feature references another.
 //
 
 import SwiftUI
 
 struct ContentView: View {
+    let library: SplatLibrary
+
+    private enum Route: Hashable {
+        case library
+        case viewer(ViewerContent)
+    }
+
+    @State private var path: [Route] = []
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 28) {
-                VStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.tint)
-                    Text("Lustre")
-                        .font(.largeTitle.weight(.semibold))
-                    Text("Capture and walk through Gaussian splats.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+        NavigationStack(path: $path) {
+            HomeView(library: library,
+                     onOpen: open,
+                     onOpenSample: openSample,
+                     onBrowseLibrary: { path.append(.library) })
+                .navigationDestination(for: Route.self) { route in
+                    switch route {
+                    case .library:
+                        LibraryView(library: library, onOpen: open, onOpenSample: openSample)
+                    case .viewer(let content):
+                        ViewerScreen(content: content)
+                    }
                 }
-
-                NavigationLink {
-                    ViewerScreen()
-                } label: {
-                    Label("Open Viewer", systemImage: "cube.transparent")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                Text(Self.poseModeDescription)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(32)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Files may have added or removed splats while we were away.
+            if phase == .active { library.refresh() }
         }
     }
 
-    /// Surfaces which pose path is active, so a simulator run doesn't look
-    /// like broken AR.
-    private static var poseModeDescription: String {
-        #if targetEnvironment(simulator)
-        "Simulator build — camera is driven by the on-screen joysticks. AR tracking needs a physical device."
-        #else
-        "Move the phone to walk through the splat."
-        #endif
+    private func open(_ item: SplatItem) {
+        library.markOpened(item)
+        path.append(.viewer(.file(item.url, name: item.name)))
+    }
+
+    private func openSample() {
+        path.append(.viewer(.sample))
     }
 }
 
 #Preview {
-    ContentView()
+    ContentView(library: SplatLibrary())
 }
