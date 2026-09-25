@@ -16,6 +16,7 @@ struct ContentView: View {
 
     private enum Route: Hashable {
         case library
+        case settings
         case viewer(ViewerContent)
     }
 
@@ -27,11 +28,14 @@ struct ContentView: View {
             HomeView(library: library,
                      onOpen: open,
                      onOpenSample: openSample,
-                     onBrowseLibrary: { path.append(.library) })
+                     onBrowseLibrary: { path.append(.library) },
+                     onOpenSettings: { path.append(.settings) })
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case .library:
                         LibraryView(library: library, onOpen: open, onOpenSample: openSample)
+                    case .settings:
+                        SettingsView(librarySizeInBytes: library.items.reduce(0) { $0 + $1.fileSize })
                     case .viewer(let content):
                         ViewerScreen(content: content,
                                      preferences: AppPreferences(reading: .standard))

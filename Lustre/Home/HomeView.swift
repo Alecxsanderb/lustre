@@ -2,11 +2,8 @@
 //  HomeView.swift
 //  Lustre
 //
-//  Landing screen: recent splats, the way into the Library, and the (not yet
-//  built) Capture entry. Reads the library; never mutates it.
-//
-//  Settings has no entry yet — it arrives with build order step 3, and a
-//  button to an empty screen is worse than no button.
+//  Landing screen: recent splats, the way into the Library and Settings, and
+//  the (not yet built) Capture entry. Reads the library; never mutates it.
 //
 
 import SwiftUI
@@ -16,6 +13,7 @@ struct HomeView: View {
     let onOpen: (SplatItem) -> Void
     let onOpenSample: () -> Void
     let onBrowseLibrary: () -> Void
+    let onOpenSettings: () -> Void
 
     private static let recentLimit = 5
 
@@ -52,6 +50,11 @@ struct HomeView: View {
             .padding()
         }
         .navigationTitle("Lustre")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Settings", systemImage: "gearshape", action: onOpenSettings)
+            }
+        }
         .refreshable { library.refresh() }
     }
 
