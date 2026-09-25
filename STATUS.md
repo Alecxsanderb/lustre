@@ -9,11 +9,21 @@ long-term history is git. Replace entries, don't append.
   2026-09-24). Project is at 1.0 (1); build number not confirmed.
 
 ## Current focus
-ROADMAP Build order **step 2 (Library + Home) is implemented and merged to `main`**,
-and verified in the simulator. Next is step 3 (Settings), once step 2 has been
-run on device.
+ROADMAP Build order **steps 2 (Library + Home) and 3 (Settings) are merged to
+`main`** and verified in the simulator. Next is step 4 (Capture: locked camera
+mode), after the on-device pass below.
 
 ## Recently done
+- **2026-09-25, step 3 Settings + test target.** `LustreTests` (hosted, Swift
+  Testing, shared `Lustre` scheme; 150 tests pass) covers PLYPreflight,
+  SplatFileNaming, AppPreferences, SplatScale/Bounds, RulerScale, Frustum,
+  LibrarySort, and the Viewer's initial/fitted scale logic. Settings (gear on
+  Home): Initial size preset, simulator-only joystick speed, library storage
+  total, version/build. Verified in the simulator: gear opens Settings, all
+  sections render, Initial size persists across relaunch and the Viewer opens
+  with it. code-reviewer pass: no correctness findings. **Not verified:**
+  joystick slider change by hand (automated drag didn't take), each preset
+  on a real ARKit plane.
 - **2026-09-25, stale docs fixed.** INTEGRATION.md no longer claims the AR
   path has never run or that we don't override `highQualityDepth`. ROADMAP's
   Viewer section now reflects Library integration and the TestFlight run.
@@ -69,8 +79,6 @@ run on device.
   user gets a specific error rather than a generic one, but still a mismatch.
   Repro: import any `.sog` → "Lustre can't read SOG files yet. Export as PLY,
   SPZ, or .splat."
-- **No test target.** The pbxproj has no test bundle, so the test-runner agent
-  has nothing to run.
 
 ## Suspected issues
 - **Passthrough camera plumbing and real-plane occlusion may be unexercised.**
@@ -92,14 +100,9 @@ run on device.
    table vs floor, background then resume with a placed splat, a large
    capture for culling pop-in.
 2. Confirm SPZ and `.splat` loading (may already be covered by the device run).
-3. ROADMAP Build order step 3 (Settings) plus a unit test target. Planned
-   2026-09-25. Decisions: Alec adds `LustreTests` in the Xcode GUI (Swift
-   Testing, shared scheme); "movement speed" becomes a simulator-only joystick
-   speed (it has no effect on device); default scale becomes an "Initial size"
-   preset (Tabletop 0.5 m / Dollhouse 1.5 m default / Room 4 m / Life size),
-   which Reset also returns to; extras are About (version/build) and a storage
-   row, not licenses. Preferences live in `Services/AppPreferences` and
-   `ContentView` injects them into the Viewer.
+3. On device: try each Initial size preset with tap-to-place, and confirm
+   the Simulator section is absent from the TestFlight build.
+4. Then ROADMAP Build order step 4 (Capture: locked camera mode).
 
 ## Open questions
 - Is the App Store name "Lustre" reserved? (Every build upload resets the

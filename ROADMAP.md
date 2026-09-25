@@ -313,7 +313,12 @@ or `@AppStorage` wrapper)
 
 **Dependencies:** Minimal. Features observe their own slice of preferences.
 
-**Status:** Build incrementally as features need it; don't front-load.
+**Status:** Minimal version built (step 3): Initial size preset (Tabletop /
+Dollhouse / Room / Life size, which Reset also returns to), a simulator-only
+joystick speed, library storage total, and version/build. "Movement speed"
+became simulator-only because on device you move by walking. Preferences live
+in `Services/AppPreferences`; `ContentView` injects them into the Viewer.
+Otherwise, build incrementally as features need it; don't front-load.
 
 ---
 
@@ -355,8 +360,8 @@ Each step ends with something runnable and testable:
    out of the repo.
 2. ~~**Library + Home (basic).**~~ **Done.** Replace the hardcoded splat with a real
    pick-from-library flow. App now feels like an app.
-3. **Settings (minimal).** Movement speed, default scale. Real preferences
-   via `@AppStorage`.
+3. ~~**Settings (minimal).**~~ **Done.** Initial size preset and a
+   simulator-only joystick speed via `@AppStorage`, plus a unit test target.
 4. **Capture: locked camera mode only.** Simplest possible "press to record
    a splat-friendly video." Export MP4 to Files.
 5. **Capture: path planner.** AR waypoints before recording starts.
