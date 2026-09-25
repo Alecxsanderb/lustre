@@ -5,8 +5,10 @@ long-term history is git. Replace entries, don't append.
 
 ## Last updated
 - 2026-09-25
-- TestFlight build: **uploaded and installed on a device** (user report,
-  2026-09-24). Project is at 1.0 (1); build number not confirmed.
+- TestFlight: **1.0 (5) uploaded 2026-09-25** (step 3 Settings, `aa46aed`),
+  not yet tested on device. The previous upload was build 4, the one installed
+  on 2026-09-24. The project file stays at build 1: uploads let App Store
+  Connect assign the build number (`manageAppVersionAndBuildNumber`).
 
 ## Current focus
 ROADMAP Build order **steps 2 (Library + Home) and 3 (Settings) are merged to
