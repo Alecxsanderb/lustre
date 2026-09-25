@@ -117,9 +117,9 @@ the polish pass), format conversion on export.
 **Purpose:** Walk through a splat by physically moving the phone, or via
 on-screen joysticks in the simulator. The scaffold is already built.
 
-**Current state:** Built and rendering. MetalSplatter is wired in and the
-sample scene renders in the simulator. The AR path compiles but has never
-executed — see the caveat below.
+**Current state:** Built and rendering. MetalSplatter is wired in; the
+viewer opens splats from the Library and has run on device via TestFlight
+(AR pose path included). See the caveat below for what's still unverified.
 
 **Sub-structure:**
 ```
@@ -152,14 +152,14 @@ provider is active, so an AR-specific view had nothing left to do.
   global on/off and an optional lock to one axis at a time
 - Spatial chunking with frustum culling, plus a load-time splat budget
 - Black or camera-passthrough background
-- File picker entry (will be replaced by Library integration)
+- Opens from the Library (or the built-in sample room); no picker of its own
 
 **Scope (future, in rough priority):**
 - ~~Wire in MetalSplatter~~ — done
 - ~~Manual placement (scale / rotate / translate) + control menu + multi-touch~~ — done
 - ~~Passthrough mode (splat over camera feed)~~ — built; compositor verified in
   the simulator against a test pattern, camera plumbing needs a device
-- Library integration (load from Library instead of file picker)
+- ~~Library integration (load from Library instead of file picker)~~ — done (step 2)
 - **SOG and other compressed containers.** MetalSplatter has no reader for them
   at any version, so this needs a decoder written from scratch (WebP planes plus
   a container unzip). Currently recognized and rejected with a clear message.
@@ -190,12 +190,13 @@ gestures with optional axis lock, a measuring ruler on the indicators, plane
 occlusion, chunk culling, and a camera-passthrough compositor — all exercised
 in the simulator.
 
-**Still unverified — needs a device.** ARKit doesn't run in the simulator, so
-`ARKitPoseProvider` compiles but has never produced a pose, and the passthrough
-path's camera plumbing (`CVMetalTextureCache` against the real capture pool,
-`displayTransform`) has never seen a real frame; only the compositor math is
-verified, against a synthetic test pattern. Real PLY files load (manually
-tested); SPZ and `.splat` loading is still untested.
+**Still unverified — needs a device.** `ARKitPoseProvider` has run on an
+iPhone (TestFlight, ~10 PLY splats viewed), but passthrough and plane occlusion
+are off by default and probably weren't exercised: the camera plumbing
+(`CVMetalTextureCache` against the real capture pool, `displayTransform`) may
+never have seen a real frame, and only the compositor math is verified, against
+a synthetic test pattern. Real PLY files load; SPZ and `.splat` loading is still
+untested. Frame timing on a large capture is unmeasured.
 
 ---
 

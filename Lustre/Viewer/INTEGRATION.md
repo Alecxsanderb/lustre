@@ -8,8 +8,9 @@ Status: MetalSplatter renders in the simulator via `SimulatedPoseProvider`.
 Placement (pivot-bracketed scale/rotate/translate), the log scale slider, the
 control menu, the two-finger gesture set, and the passthrough compositor are all
 verified there.
-Everything AR-related below is **designed, not verified** — see "What has never
-run" at the end.
+The ARKit pose path has run on device (TestFlight, 2026-09-24: ~10 PLY splats
+loaded and viewed). Most other AR-specific behavior is still **designed, not
+verified**. See "What has never run" at the end.
 
 ---
 
@@ -134,9 +135,11 @@ pixel-format range flag) remains device-only.
 
 Offscreen targets are allocated lazily on first enable and released on
 toggle-off and on memory warning — ~24 MB at phone resolution. Depth is
-`.private`, not `.memoryless`: the library's device-only multi-stage pipeline
-has never run, and if it touches depth across encoder boundaries a memoryless
-attachment would break in a way no simulator run reveals.
+`.private`, not `.memoryless`. With `highQualityDepth: false` the library's
+multi-stage pipeline is off on device too, so this is now a hedge rather than a
+requirement. If that pipeline is ever re-enabled and touches depth across encoder
+boundaries, a memoryless attachment would break in a way no simulator run
+reveals.
 
 ## 4. Occlusion — planes built, full scene depth still out
 
@@ -381,8 +384,8 @@ Constraints the visionOS path never has to think about:
   `didReceiveMemoryWarningNotification`. On a big load the app will be jetsammed
   with no diagnostic. At minimum: fail the load cleanly, `removeAllChunks()`,
   and surface a real message.
-- **`highQualityDepth` — turn it off.** See the audit below; this is the one
-  concrete visionOS cost we're currently paying.
+- **`highQualityDepth` is off.** See the audit below. It was the one
+  concrete visionOS cost we were paying.
 
 ---
 
@@ -465,18 +468,17 @@ for the whole search set is `maxViewCount: 1`, which is the monoscopic setting.
 
 Three things worth acting on:
 
-1. **`highQualityDepth` defaults to `true` and we don't override it.**
-   `SplatRenderer.swift:92` constructs the library renderer without it. The
+1. **`highQualityDepth` defaults to `true`. Resolved: we now pass `false`**
+   (`SplatRenderer` construction). The
    library's own doc comment: high-quality depth "takes longer" and exists for
    "reducing artifacts during Vision Pro's frame reprojection." It gates
    `useMultiStagePipeline` (`writeDepth && highQualityDepth`), an imageblock
    tile-memory path with three stages instead of one. **On monoscopic iPhone
-   there is no reprojection, so this is pure cost.** Pass
-   `highQualityDepth: false`.
-   Sharper still: `useMultiStagePipeline` is hardcoded `false` under
-   `targetEnvironment(simulator)`. Every simulator verification so far exercised
-   the single-stage path, while a device would take the multi-stage one — so the
-   pipeline that actually ships is the one that has never been run.
+   there is no reprojection, so this is pure cost.**
+   It mattered beyond speed: `useMultiStagePipeline` is hardcoded `false` under
+   `targetEnvironment(simulator)`, so with the default a device would have taken
+   a pipeline no simulator run had exercised. With `false`, device and simulator
+   run the same single-stage path.
 
 2. **`TARGETED_DEVICE_FAMILY = "1,2"`** (both configs) ships an iPad binary, and
    `INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad` is populated. Not
@@ -490,17 +492,18 @@ Three things worth acting on:
 
 ## What has never run
 
-`ARKitPoseProvider` has not executed a single line on hardware — ARKit reports
-unsupported in the simulator. Unverified: the 6DoF path, `viewMatrix(for:)` /
-`projectionMatrix(for:)` correctness, `recenter()`, whether a splat actually
-sits still relative to the room, the multi-stage depth pipeline, and loading any
-real PLY/SPZ/`.splat` file. Also unverified: everything in the passthrough path
+`ARKitPoseProvider` has now run on hardware. A TestFlight build on an iPhone
+loaded and viewed ~10 real PLY splats, and the user reported that it worked well.
+That was a user report, not a checklist. Not specifically confirmed: `recenter()`,
+nudge direction, the drop line on a table vs. the floor, whether a placed splat
+keeps its anchor across background/resume, and whether the splat stays still
+relative to the room over a long session. Real PLYs load; SPZ and `.splat` are
+still untested. Also unverified: everything in the passthrough path
 that touches ARKit — wrapping `capturedImage` planes through
 `CVMetalTextureCache`, the `displayTransform` inverse against a real camera, and
 the full/video-range flag. The compositor *math* is verified in the simulator
-against `TestPatternCameraSource`; the camera plumbing feeding it is not. The procedural `SampleSplatScene` (~12k splats) is
-the only scene that has ever reached the renderer, and it says nothing about
-performance at the 1–5M splats real captures produce.
+against `TestPatternCameraSource`; the camera plumbing feeding it is not. Real PLYs have reached the renderer, but nobody has measured frame timing, so
+performance at the 1–5M splats that real captures produce is still unknown.
 
 Newly added, and unverified on hardware for the same reason:
 

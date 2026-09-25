@@ -4,7 +4,7 @@ Snapshot of where things stand. Plan and build order live in ROADMAP.md;
 long-term history is git. Replace entries, don't append.
 
 ## Last updated
-- 2026-09-24
+- 2026-09-25
 - TestFlight build: **uploaded and installed on a device** (user report,
   2026-09-24). Project is at 1.0 (1); build number not confirmed.
 
@@ -14,6 +14,9 @@ and verified in the simulator. Next is step 3 (Settings), once step 2 has been
 run on device.
 
 ## Recently done
+- **2026-09-25, stale docs fixed.** INTEGRATION.md no longer claims the AR
+  path has never run or that we don't override `highQualityDepth`. ROADMAP's
+  Viewer section now reflects Library integration and the TestFlight run.
 - **2026-09-24, step 2 Library + Home.** Home (recents row, disabled Capture
   CTA, Browse Library) is now the root; Library grid over `Documents/Splats/`
   with multi-file import (copied in, `name 2.ply` on collision), rename
@@ -66,10 +69,6 @@ run on device.
   user gets a specific error rather than a generic one, but still a mismatch.
   Repro: import any `.sog` → "Lustre can't read SOG files yet. Export as PLY,
   SPZ, or .splat."
-- **INTEGRATION.md is stale in two places.** "visionOS audit" item 1 says we
-  don't override `highQualityDepth`, but `SplatRenderer.swift:249` passes
-  `false` (so its multi-stage-pipeline warning no longer applies). "What has
-  never run" still lists loading real PLY files. Repro: read both.
 - **No test target.** The pbxproj has no test bundle, so the test-runner agent
   has nothing to run.
 
@@ -93,8 +92,8 @@ run on device.
    table vs floor, background then resume with a placed splat, a large
    capture for culling pop-in.
 2. Confirm SPZ and `.splat` loading (may already be covered by the device run).
-3. Fix the stale docs listed under Known issues.
-4. Then ROADMAP Build order step 3 (Settings); add the Home settings entry.
+3. ROADMAP Build order step 3 (Settings) plus a unit test target; add the
+   Home settings entry. Being planned (architect).
 
 ## Open questions
 - Is the App Store name "Lustre" reserved? (Every build upload resets the
