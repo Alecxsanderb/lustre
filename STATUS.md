@@ -20,10 +20,11 @@ mode), after the on-device pass below.
   LibrarySort, and the Viewer's initial/fitted scale logic. Settings (gear on
   Home): Initial size preset, simulator-only joystick speed, library storage
   total, version/build. Verified in the simulator: gear opens Settings, all
-  sections render, Initial size persists across relaunch and the Viewer opens
-  with it. code-reviewer pass: no correctness findings. **Not verified:**
-  joystick slider change by hand (automated drag didn't take), each preset
-  on a real ARKit plane.
+  sections render, Initial size persists across relaunch, and a splat opens
+  with Room set (scale math covered by unit tests; the on-screen scale
+  readout wasn't checked). code-reviewer pass: no correctness findings.
+  **Not verified:** joystick slider change by hand (automated drag didn't
+  take), each preset on a real ARKit plane.
 - **2026-09-25, stale docs fixed.** INTEGRATION.md no longer claims the AR
   path has never run or that we don't override `highQualityDepth`. ROADMAP's
   Viewer section now reflects Library integration and the TestFlight run.
