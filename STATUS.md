@@ -9,11 +9,22 @@ long-term history is git. Replace entries, don't append.
   2026-09-24). Project is at 1.0 (1); build number not confirmed.
 
 ## Current focus
-ROADMAP Build order **step 1 (wire MetalSplatter into Viewer) is done**; step 2
-(Library + Home) has not started. Recent work has been Viewer polish beyond
-step 1.
+ROADMAP Build order **step 2 (Library + Home) is implemented** (branch `library-home`),
+and verified in the simulator. Next is step 3 (Settings), once step 2 has been
+run on device.
 
 ## Recently done
+- **2026-09-24, step 2 Library + Home.** Home (recents row, disabled Capture
+  CTA, Browse Library) is now the root; Library grid over `Documents/Splats/`
+  with multi-file import (copied in, `name 2.ply` on collision), rename
+  (renames the file), delete, share (original file), sort by date/name/size.
+  Viewer takes a `ViewerContent` and lost its own import button; the sample
+  room is reachable from Home/Library. Files app shows Lustre › Splats
+  (`Config/Lustre-Info.plist` adds `UIFileSharingEnabled`). Verified in the
+  simulator: Files drop-in picked up on refresh, picker import, rename
+  (validation + collision errors), delete, recents ordering, open → Viewer.
+  code-reviewer pass done; its one real finding (full rescan on open) fixed.
+  **Not verified:** on device, Share sheet, SPZ/.splat through the Library.
 - 2026-09-09, three commits (`dea8af7`, `e96770e`, `2cd7d8c`): Viewer controls,
   anchored tap-to-place, position indicators, measuring ruler, plane occlusion,
   chunking + frustum culling, quality budget, passthrough compositor.
@@ -34,6 +45,16 @@ step 1.
   - `sog`/`sogs` are rejected before parsing with a format-specific message.
 
 ## Known issues
+- **Truncated PLY hangs the Viewer on "Loading…" forever.** MetalSplatter's
+  `SplatPLYSceneReader.read()` runs its loop in an unstructured `Task`, so
+  PLYIO's `unexpectedEndOfFile` is swallowed and the stream never finishes.
+  Pre-existing, but the Library makes it easier to hit (e.g. a partial Files
+  copy). Repro: `head -c 300000` a valid PLY into `Documents/Splats/`, open it.
+  Back still works. Fix planned app-side in `SplatFileIO` (task spun off).
+- **No thumbnails.** Library/Home show tinted placeholder tiles; deferred to
+  the polish pass by decision.
+- **Viewer nav title is black on the black background** when passthrough is
+  off (pre-existing; used to say "Viewer", now the splat name).
 - **Picker offers formats the parser can't read (SOG).** Deliberate, so the
   user gets a specific error rather than a generic one, but still a mismatch.
   Repro: import any `.sog` → "Lustre can't read SOG files yet. Export as PLY,
@@ -42,8 +63,6 @@ step 1.
   don't override `highQualityDepth`, but `SplatRenderer.swift:249` passes
   `false` (so its multi-stage-pipeline warning no longer applies). "What has
   never run" still lists loading real PLY files. Repro: read both.
-- **ROADMAP.md "Components"** says `VirtualJoystick` lives in
-  `Viewer/Simulator/`; it's in `Components/`.
 - **No test target.** The pbxproj has no test bundle, so the test-runner agent
   has nothing to run.
 
@@ -61,12 +80,15 @@ step 1.
   with a multi-million-splat capture.
 
 ## Next up
+0. Merge `library-home`, run it on device (TestFlight): import from Files/iCloud,
+   Share sheet, open a large capture from the Library.
 1. Run the review fixes on device: nudge arrows, drop line on
    table vs floor, background then resume with a placed splat, a large
    capture for culling pop-in.
 2. Confirm SPZ and `.splat` loading (may already be covered by the device run).
 3. Fix the stale docs listed under Known issues.
-4. Then ROADMAP Build order step 2 (Library + Home).
+4. Fix the truncated-PLY hang.
+5. Then ROADMAP Build order step 3 (Settings); add the Home settings entry.
 
 ## Open questions
 - Is the App Store name "Lustre" reserved? (Every build upload resets the
@@ -74,4 +96,8 @@ step 1.
 - Which iPhone is the device target? Which formats were in the ~10 test splats?
 - Keep SOG in the picker with its specific error, or hide it until there's a
   decoder?
-- Add a unit test target now (Core math and SplatIO are easy wins), or wait?
+- Add a unit test target now (Core math, SplatIO, and `SplatFileNaming` are
+  easy wins), or wait?
+- `SplatLibrary` scans the folder synchronously on the main actor (init,
+  foreground, after mutations). Fine at tens of files; revisit if Capture
+  makes libraries large.

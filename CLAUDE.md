@@ -11,7 +11,7 @@ not orbiting a model.
   on iOS 16. Don't use APIs newer than 18.0 without flagging it.
 - Metal + MetalSplatter (SPM) for rendering; ARKit for 6DoF pose; AVFoundation
   for capture; CoreMotion for motion analysis.
-- Bundle ID `com.alecborer.Lustre`. Apple Silicon only — MetalSplatter
+- Bundle ID `com.alecborer.lustre` (lowercase — `simctl` is case-sensitive). Apple Silicon only — MetalSplatter
   `fatalError`s on x86_64. Development machine is a MacBook Air M4 16GB.
 - Reference apps in the same space: Scaniverse, Polycam, RadianceKit (macOS
   only), Gaussian SplatKing.
@@ -24,11 +24,13 @@ Status is not duplicated here, because a second copy drifts.
 
 ```
 Lustre/
-├── App/         # LustreApp (@main), ContentView (nav root)
+├── App/         # LustreApp (@main), ContentView (nav root, the only place features meet)
+├── Home/        # HomeView, RecentSplatsRow, CaptureCTAButton
+├── Library/     # LibraryView, SplatDetailSheet, LibrarySort
 ├── Viewer/      # Rendering/ AR/ Simulator/ UI/ + INTEGRATION.md
-├── Components/  # VirtualJoystick
-├── Core/        # Shared math
-└── Services/    # SplatIO wrapper, SampleSplatScene
+├── Components/  # VirtualJoystick, SplatPreviewCard
+├── Core/        # Shared math, SplatItem
+└── Services/    # SplatIO wrapper, SplatLibrary, SampleSplatScene
 ```
 
 - **No cross-feature imports.** A feature never imports from another feature
@@ -40,8 +42,14 @@ Lustre/
   visionOS or stereo rendering.** Single-view rendering (`maxViewCount: 1`), no
   side-by-side, no iPad-specific layouts (a universal binary is fine).
 - **No cloud dependency** in core capture / view / library paths.
-- **Storage:** `Documents/` for captured and saved splats (user-visible in
-  Files); `Caches/` for imports, thumbnails, anything regenerable.
+- **Storage:** `Documents/Splats/` for every library splat, captured or
+  imported (user-visible in Files as Lustre › Splats; the folder is the source
+  of truth). Imports are copied here, not to `Caches/`, because Caches can be
+  purged. `Caches/` is for thumbnails and anything else regenerable.
+- **Info.plist:** generated from `INFOPLIST_KEY_*` build settings, merged with
+  `Config/Lustre-Info.plist` for keys that have no build setting
+  (`UIFileSharingEnabled`). Keep that file outside `Lustre/`, or the
+  synchronized folder copies it in as a resource.
 - Prefer value types and `@Observable` over ad-hoc singletons. The project sets
   `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so types are MainActor-isolated
   unless marked `nonisolated` — relevant any time work must leave the main

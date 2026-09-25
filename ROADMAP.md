@@ -56,8 +56,8 @@ self-contained enough that it can be developed and tested in isolation.
 **Scope:** `LustreApp.swift` (@main), root `ContentView` that hosts
 the navigation stack, any app-wide environment objects.
 
-**Status:** Skeleton in place from the scaffold; will be rewritten when
-Home becomes the root view.
+**Status:** Built. `ContentView` hosts a `NavigationStack` with Home as
+root; features report picks through callbacks and this layer routes them.
 
 ---
 
@@ -75,7 +75,8 @@ Home becomes the root view.
 
 **Dependencies:** Library (read-only), navigation links to Viewer / Capture / Settings
 
-**Status:** Planned
+**Status:** Basic version built (step 2). Capture CTA is shown disabled
+until Capture exists; the settings entry waits for step 3.
 
 ---
 
@@ -94,8 +95,9 @@ equivalent for splats.
 **Key components:** `LibraryView`, `SplatGridCell`, `SplatDetailSheet`,
 `ThumbnailGenerator` (service)
 
-**Storage strategy:** Documents directory for captured/saved splats
-(user-visible via Files app); Caches directory for imports and previews
+**Storage strategy:** `Documents/Splats/` for all library splats, captured
+or imported (user-visible via Files app). Imports are copied in rather than
+cached, since Caches can be purged. Caches directory for previews
 that can be regenerated.
 
 **Dependencies:** Core (Splat model), Services (file I/O, sharing)
@@ -104,7 +106,9 @@ that can be regenerated.
 - Thumbnails: render on first view, cache to disk? Background queue?
 - Folders/tags/collections — probably no for v1.
 
-**Status:** Planned
+**Status:** Basic version built (step 2): grid, import, rename, delete,
+share (original file), sort. Not yet: thumbnails (placeholder tiles until
+the polish pass), format conversion on export.
 
 ---
 
@@ -317,7 +321,7 @@ or `@AppStorage` wrapper)
 ### Core
 
 Shared types used across features. Likely contents:
-- `Splat` model (metadata, format enum: PLY/SPZ/.splat, source, capture date)
+- `SplatItem` model (built in step 2; metadata, format enum: PLY/SPZ/.splat, source, capture date)
 - Math utilities (matrix helpers from Viewer/Rendering can move here as
   they're reused)
 - Format definitions and constants
@@ -325,7 +329,8 @@ Shared types used across features. Likely contents:
 ### Services
 
 Cross-feature services:
-- `SplatStorage` — read/write splats to documents/caches, list, delete
+- `SplatLibrary` — lists, imports, renames, deletes splats in
+  `Documents/Splats/` (built in step 2)
 - `SplatIO` — format-specific loading. MetalSplatter handles most of this;
   this is a thin app-side wrapper
 - `ThumbnailGenerator` — render preview images for Library
@@ -334,7 +339,7 @@ Cross-feature services:
 ### Components
 
 Reusable UI:
-- `VirtualJoystick` — currently in Viewer/Simulator/, move here when reused
+- `VirtualJoystick` — analog stick used by the simulator controls
 - `SplatPreviewCard` — thumbnail + metadata cell for Library/Home
 - Any future AR overlay primitives used by both Viewer and Capture
 
@@ -347,7 +352,7 @@ Each step ends with something runnable and testable:
 1. ~~**Wire MetalSplatter into Viewer.**~~ **Done.** The sample scene is
    generated procedurally rather than bundled as a PLY, to keep a large binary
    out of the repo.
-2. **Library + Home (basic).** Replace the hardcoded splat with a real
+2. ~~**Library + Home (basic).**~~ **Done.** Replace the hardcoded splat with a real
    pick-from-library flow. App now feels like an app.
 3. **Settings (minimal).** Movement speed, default scale. Real preferences
    via `@AppStorage`.
