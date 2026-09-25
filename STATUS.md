@@ -92,8 +92,14 @@ run on device.
    table vs floor, background then resume with a placed splat, a large
    capture for culling pop-in.
 2. Confirm SPZ and `.splat` loading (may already be covered by the device run).
-3. ROADMAP Build order step 3 (Settings) plus a unit test target; add the
-   Home settings entry. Being planned (architect).
+3. ROADMAP Build order step 3 (Settings) plus a unit test target. Planned
+   2026-09-25. Decisions: Alec adds `LustreTests` in the Xcode GUI (Swift
+   Testing, shared scheme); "movement speed" becomes a simulator-only joystick
+   speed (it has no effect on device); default scale becomes an "Initial size"
+   preset (Tabletop 0.5 m / Dollhouse 1.5 m default / Room 4 m / Life size),
+   which Reset also returns to; extras are About (version/build) and a storage
+   row, not licenses. Preferences live in `Services/AppPreferences` and
+   `ContentView` injects them into the Viewer.
 
 ## Open questions
 - Is the App Store name "Lustre" reserved? (Every build upload resets the
@@ -101,9 +107,6 @@ run on device.
 - Which iPhone is the device target? Which formats were in the ~10 test splats?
 - Keep SOG in the picker with its specific error, or hide it until there's a
   decoder?
-- Add a unit test target now (Core math, SplatIO, and `SplatFileNaming` are
-  easy wins), or wait? `PLYPreflight.check(prefix:fileSize:)` is pure and
-  would be a good first test.
 - File the MetalSplatter PLY-hang issue upstream?
 - `SplatLibrary` scans the folder synchronously on the main actor (init,
   foreground, after mutations). Fine at tens of files; revisit if Capture
