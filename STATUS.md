@@ -25,6 +25,16 @@ run on device.
   (validation + collision errors), delete, recents ordering, open → Viewer.
   code-reviewer pass done; its one real finding (full rescan on open) fixed.
   **Not verified:** on device, Share sheet, SPZ/.splat through the Library.
+- **2026-09-24, damaged PLYs no longer hang on "Loading…".** MetalSplatter
+  1.0.1's `SplatPLYSceneReader` drops any error PLYIO throws mid-body and
+  never finishes its stream. App-side fix in `Services/`: `PLYPreflight`
+  checks a binary PLY's size against its header (truncated → "is
+  incomplete", trailing bytes → "isn't a valid PLY file"; also rejects
+  element counts > UInt32.max, which crash PLYIO). `SplatStreamWatchdog`
+  fails any read that yields nothing for 20 s, catching what a size check
+  can't (malformed ASCII rows, lists). Verified in the simulator via the
+  Library with truncated, trailing-byte, bad-ASCII, and valid PLYs. SPZ
+  (synchronous) and `.splat` (finishes its stream on error) aren't affected.
 - 2026-09-09, three commits (`dea8af7`, `e96770e`, `2cd7d8c`): Viewer controls,
   anchored tap-to-place, position indicators, measuring ruler, plane occlusion,
   chunking + frustum culling, quality budget, passthrough compositor.
@@ -45,12 +55,9 @@ run on device.
   - `sog`/`sogs` are rejected before parsing with a format-specific message.
 
 ## Known issues
-- **Truncated PLY hangs the Viewer on "Loading…" forever.** MetalSplatter's
-  `SplatPLYSceneReader.read()` runs its loop in an unstructured `Task`, so
-  PLYIO's `unexpectedEndOfFile` is swallowed and the stream never finishes.
-  Pre-existing, but the Library makes it easier to hit (e.g. a partial Files
-  copy). Repro: `head -c 300000` a valid PLY into `Documents/Splats/`, open it.
-  Back still works. Fix planned app-side in `SplatFileIO` (task spun off).
+- **MetalSplatter's PLY reader hangs on body errors** (upstream bug in
+  1.0.1, still on `main`; worked around app-side, see Recently done). Issue
+  not filed yet; draft text exists.
 - **No thumbnails.** Library/Home show tinted placeholder tiles; deferred to
   the polish pass by decision.
 - **Viewer nav title is black on the black background** when passthrough is
@@ -87,8 +94,7 @@ run on device.
    capture for culling pop-in.
 2. Confirm SPZ and `.splat` loading (may already be covered by the device run).
 3. Fix the stale docs listed under Known issues.
-4. Fix the truncated-PLY hang.
-5. Then ROADMAP Build order step 3 (Settings); add the Home settings entry.
+4. Then ROADMAP Build order step 3 (Settings); add the Home settings entry.
 
 ## Open questions
 - Is the App Store name "Lustre" reserved? (Every build upload resets the
@@ -97,7 +103,9 @@ run on device.
 - Keep SOG in the picker with its specific error, or hide it until there's a
   decoder?
 - Add a unit test target now (Core math, SplatIO, and `SplatFileNaming` are
-  easy wins), or wait?
+  easy wins), or wait? `PLYPreflight.check(prefix:fileSize:)` is pure and
+  would be a good first test.
+- File the MetalSplatter PLY-hang issue upstream?
 - `SplatLibrary` scans the folder synchronously on the main actor (init,
   foreground, after mutations). Fine at tens of files; revisit if Capture
   makes libraries large.

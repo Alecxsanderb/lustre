@@ -33,6 +33,9 @@ enum SplatFileIO {
         case unsupportedFormat(URL)
         case notYetSupported(URL)
         case empty(URL)
+        case truncated(URL)
+        case malformed(URL)
+        case stalled(URL)
 
         var errorDescription: String? {
             switch self {
@@ -45,6 +48,12 @@ enum SplatFileIO {
                 return "Lustre can't read \(format) files yet. Export as PLY, SPZ, or .splat."
             case .empty(let url):
                 return "\(url.lastPathComponent) contains no splats."
+            case .truncated(let url):
+                return "\(url.lastPathComponent) is incomplete. It may have been cut off while copying."
+            case .malformed(let url):
+                return "\(url.lastPathComponent) isn't a valid PLY file."
+            case .stalled(let url):
+                return "Lustre couldn't finish reading \(url.lastPathComponent). The file may be damaged."
             }
         }
     }
@@ -89,6 +98,22 @@ enum SplatFileIO {
             throw LoadError.unsupportedFormat(url)
         }
 
+        // MetalSplatter hangs, rather than throwing, on a binary PLY whose
+        // body doesn't match its header. See PLYPreflight.swift.
+        if fileExtension == "ply" {
+            let verdict: PLYPreflight.Verdict
+            do {
+                verdict = try PLYPreflight.check(url)
+            } catch {
+                throw LoadError.unreadableFile(url)
+            }
+            switch verdict {
+            case .proceed: break
+            case .truncated: throw LoadError.truncated(url)
+            case .trailingData, .malformedHeader: throw LoadError.malformed(url)
+            }
+        }
+
         let reader: SplatSceneReader
         do {
             reader = try AutodetectSceneReader(url)
@@ -96,7 +121,12 @@ enum SplatFileIO {
             throw LoadError.unsupportedFormat(url)
         }
 
-        let points = try await reader.readAll()
+        let points: [SplatPoint]
+        do {
+            points = try await SplatStreamWatchdog.readAll(reader)
+        } catch is SplatStreamWatchdog.Stalled {
+            throw LoadError.stalled(url)
+        }
         guard !points.isEmpty else { throw LoadError.empty(url) }
         return points
     }
