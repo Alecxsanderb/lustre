@@ -50,6 +50,31 @@ struct PlacementCandidate: Equatable {
     var isOnSurface: Bool
 }
 
+/// What the placement UI needs to know, coarsened so it changes only a few
+/// times per placement rather than every frame.
+///
+/// The candidate's transform moves every frame, and the renderer polls it
+/// directly. The UI must not: observing a per-frame value would re-render the
+/// overlay at display rate. And it can't observe the candidate at all on
+/// device, because ARKit's frame and raycast aren't Observation-tracked —
+/// which is why this is a separate, stored value.
+nonisolated enum PlacementReadiness: Equatable, Sendable {
+    /// No candidate yet: tracking hasn't started or isn't nominal.
+    case unavailable
+    /// A guess a fixed distance ahead; placing is allowed but ungrounded.
+    case estimated
+    /// The crosshair is on a detected surface.
+    case onSurface
+
+    init(candidate: PlacementCandidate?) {
+        switch candidate?.isOnSurface {
+        case nil: self = .unavailable
+        case false?: self = .estimated
+        case true?: self = .onSurface
+        }
+    }
+}
+
 @MainActor
 protocol SurfaceProvider: AnyObject {
     /// Plane detection is expensive, so it's opt-in and must genuinely stop
@@ -58,8 +83,19 @@ protocol SurfaceProvider: AnyObject {
 
     var detectedPlanes: [DetectedPlane] { get }
 
-    /// Raycast from the center of the screen. Nil before tracking is ready.
+    /// Set while the placement step is on screen. Providers only compute the
+    /// candidate while this is true, so there's no per-frame raycast otherwise.
+    var isPlacementActive: Bool { get set }
+
+    /// Raycast from the center of the screen. Nil before tracking is ready or
+    /// while placement isn't active. Read by the renderer every frame; UI
+    /// should observe `placementReadiness` instead.
     var placementCandidate: PlacementCandidate? { get }
+
+    /// Observable summary of `placementCandidate` for the UI. Implementations
+    /// must assign it only when it actually changes: Observation notifies on
+    /// every set, equal value or not.
+    var placementReadiness: PlacementReadiness { get }
 
     /// Anchors the splat so the platform can correct it as tracking improves.
     /// This is the drift fix: a hardcoded world transform doesn't move when

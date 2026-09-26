@@ -62,6 +62,14 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
     fileprivate var detectsSurfaces = false
     fileprivate var planes: [DetectedPlane] = []
     fileprivate var placedAnchorIDs: Set<UUID> = []
+    fileprivate var wantsPlacementCandidate = false
+
+    /// Refreshed once per frame in `update(deltaTime:)` while placement is
+    /// active. Ignored by Observation because it changes every frame; the UI
+    /// observes `placementReadiness`, which changes only when this crosses
+    /// between nil / estimated / on-surface.
+    @ObservationIgnored fileprivate var cachedCandidate: PlacementCandidate?
+    fileprivate(set) var placementReadiness: PlacementReadiness = .unavailable
 
     func start() {
         guard Self.isSupported else {
@@ -85,6 +93,8 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
         guard isRunning else { return }
         session.pause()
         isRunning = false
+        // `update` stops polling while paused, so the cache would go stale.
+        setPlacementCandidate(nil)
     }
 
     /// Polls the session rather than using ARSessionDelegate: the render loop
@@ -94,8 +104,12 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
 
         let camera = frame.camera
         latestCamera = camera
-        statusMessage = message(for: camera.trackingState)
+        // Guarded because this runs every frame and Observation notifies on
+        // every set; the placement overlay observes it.
+        let status = message(for: camera.trackingState)
+        if status != statusMessage { statusMessage = status }
         refreshPlanes(from: frame)
+        refreshPlacementCandidate(from: frame)
 
         // A pose from a non-tracking camera is garbage; hold the last good one.
         guard case .normal = camera.trackingState else { return }
@@ -264,12 +278,40 @@ extension ARKitPoseProvider: SurfaceProvider {
         set { planes = newValue }
     }
 
+    var isPlacementActive: Bool {
+        get { wantsPlacementCandidate }
+        set {
+            guard newValue != wantsPlacementCandidate else { return }
+            wantsPlacementCandidate = newValue
+            if !newValue { setPlacementCandidate(nil) }
+        }
+    }
+
+    /// The candidate from the most recent frame. Cached rather than raycast on
+    /// read: the renderer reads it every frame, and SwiftUI can't observe a
+    /// live raycast anyway.
+    var placementCandidate: PlacementCandidate? { cachedCandidate }
+
+    /// Called from `update(deltaTime:)`, which already polls the frame.
+    fileprivate func refreshPlacementCandidate(from frame: ARFrame) {
+        guard wantsPlacementCandidate else { return }
+        setPlacementCandidate(computePlacementCandidate(from: frame))
+    }
+
+    /// The only writer of the candidate, so readiness can't fall out of sync
+    /// with it, and readiness is assigned only on change.
+    fileprivate func setPlacementCandidate(_ candidate: PlacementCandidate?) {
+        cachedCandidate = candidate
+        let readiness = PlacementReadiness(candidate: candidate)
+        if readiness != placementReadiness { placementReadiness = readiness }
+    }
+
     /// Raycast straight down the middle of the screen.
     ///
     /// `ARFrame.raycastQuery` takes a point in **normalized image space**, so
     /// screen center is (0.5, 0.5) and no view geometry is needed.
-    var placementCandidate: PlacementCandidate? {
-        guard isRunning, let frame = session.currentFrame else { return nil }
+    private func computePlacementCandidate(from frame: ARFrame) -> PlacementCandidate? {
+        guard isRunning else { return nil }
         guard case .normal = frame.camera.trackingState else { return nil }
 
         if detectsSurfaces {

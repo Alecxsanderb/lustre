@@ -40,6 +40,11 @@ final class SimulatedPoseProvider: PoseProvider {
     /// extension because Swift extensions can't add stored properties.
     var detectsSurfaces = false
     var anchors: [UUID: simd_float4x4] = [:]
+    var wantsPlacementCandidate = false
+
+    /// Stored, not derived from `pose` on read: a view reading `pose` would
+    /// re-render every frame. Written only on change by `refreshReadiness()`.
+    private(set) var placementReadiness: PlacementReadiness = .unavailable
 
     static let syntheticFloorID = UUID()
 
@@ -86,6 +91,16 @@ final class SimulatedPoseProvider: PoseProvider {
         let rotation = matrix4x4_rotation(radians: yaw, axis: SIMD3<Float>(0, 1, 0))
             * matrix4x4_rotation(radians: pitch, axis: SIMD3<Float>(1, 0, 0))
         pose = CameraPose(transform: matrix4x4_translation(position) * rotation)
+        refreshReadiness()
+    }
+
+    /// Called whenever an input to the candidate changes: the pose, surface
+    /// detection, or whether placement is active.
+    fileprivate func refreshReadiness() {
+        let readiness = wantsPlacementCandidate
+            ? PlacementReadiness(candidate: placementCandidate)
+            : .unavailable
+        if readiness != placementReadiness { placementReadiness = readiness }
     }
 }
 
@@ -104,7 +119,18 @@ extension SimulatedPoseProvider: SurfaceProvider {
 
     var isSurfaceDetectionEnabled: Bool {
         get { detectsSurfaces }
-        set { detectsSurfaces = newValue }
+        set {
+            detectsSurfaces = newValue
+            refreshReadiness()
+        }
+    }
+
+    var isPlacementActive: Bool {
+        get { wantsPlacementCandidate }
+        set {
+            wantsPlacementCandidate = newValue
+            refreshReadiness()
+        }
     }
 
     var detectedPlanes: [DetectedPlane] {
@@ -115,7 +141,7 @@ extension SimulatedPoseProvider: SurfaceProvider {
     }
 
     var placementCandidate: PlacementCandidate? {
-        guard detectsSurfaces else { return nil }
+        guard detectsSurfaces, wantsPlacementCandidate else { return nil }
 
         let origin = pose.position
         let forward = -pose.transform.columns.2.xyz

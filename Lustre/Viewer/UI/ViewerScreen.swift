@@ -77,8 +77,8 @@ struct ViewerScreen: View {
             }
 
             if model.isAwaitingPlacement {
-                PlacementOverlay(candidate: model.placementCandidate,
-                                 hasDetectedSurface: model.placementCandidate?.isOnSurface == true,
+                PlacementOverlay(readiness: model.placementReadiness,
+                                 statusMessage: model.statusMessage,
                                  onPlace: model.confirmPlacement)
             }
         }

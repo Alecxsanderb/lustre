@@ -155,8 +155,13 @@ final class ViewerModel {
     }
 
 
-    /// What the placement UI shows while awaiting a surface.
+    /// Where the splat previews while awaiting a surface. Per-frame and, on
+    /// device, not observable: for the renderer path, not for views.
     var placementCandidate: PlacementCandidate? { surfaceProvider?.placementCandidate }
+
+    /// What the placement overlay observes. Changes only when the candidate
+    /// crosses between none / estimated / on-surface.
+    var placementReadiness: PlacementReadiness { surfaceProvider?.placementReadiness ?? .unavailable }
 
     var isAwaitingPlacement: Bool { sceneState.placementState == .awaitingSurface }
 
@@ -200,6 +205,7 @@ final class ViewerModel {
         }
         sceneState.placementState = .awaitingSurface
         syncSurfaceDetection()
+        surfaceProvider?.isPlacementActive = true
     }
 
     func confirmPlacement() {
@@ -208,6 +214,7 @@ final class ViewerModel {
         sceneState.placedTransform = transform
         sceneState.anchorID = surfaceProvider?.makeAnchor(at: transform)
         sceneState.placementState = .placed
+        surfaceProvider?.isPlacementActive = false
         syncSurfaceDetection()
     }
 
