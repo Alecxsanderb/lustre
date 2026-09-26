@@ -257,7 +257,7 @@ actor ThumbnailGenerator {
         idleTask = Task(priority: .utility) {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            await self.releaseIfIdle()
+            self.releaseIfIdle()
         }
     }
 
