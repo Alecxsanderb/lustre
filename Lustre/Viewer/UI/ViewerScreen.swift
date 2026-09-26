@@ -14,9 +14,13 @@ import SwiftUI
 
 struct ViewerScreen: View {
     let content: ViewerContent
-    /// A snapshot taken when the Viewer opens; Settings can't be reached from
-    /// here, so there's nothing to observe.
+    /// A snapshot taken when the Viewer opens. Settings can't be reached from
+    /// here, so nothing changes it *during* a session; the Viewer's own
+    /// display changes go out through `onDisplayChange` instead.
     let preferences: AppPreferences
+    /// Called when the user changes a remembered display setting, with the
+    /// whole set. Not called for the values applied at open.
+    let onDisplayChange: (AppPreferences.ViewerDisplay) -> Void
 
     @State private var model = ViewerModel()
     @Environment(\.scenePhase) private var scenePhase
@@ -85,7 +89,11 @@ struct ViewerScreen: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            model.apply(preferences)
+            // Once per model: if the task ever reruns, re-applying the
+            // snapshot would undo this session's changes.
+            if model.persistedDisplay == nil {
+                model.apply(preferences)
+            }
             model.onAppear()
             if model.sceneState.loadState == .empty {
                 await model.load(content)
@@ -93,6 +101,14 @@ struct ViewerScreen: View {
         }
         .onDisappear {
             model.onDisappear()
+        }
+        // The first change, nil to the applied values, is `apply` itself and
+        // is skipped: only a user change writes back. (If SwiftUI ever first
+        // observes the applied value directly, no change fires at all, so
+        // either way opening a splat writes nothing.)
+        .onChange(of: model.persistedDisplay) { old, new in
+            guard old != nil, let new else { return }
+            onDisplayChange(new)
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
@@ -116,6 +132,6 @@ struct ViewerScreen: View {
 
 #Preview {
     NavigationStack {
-        ViewerScreen(content: .sample, preferences: .defaults)
+        ViewerScreen(content: .sample, preferences: .defaults, onDisplayChange: { _ in })
     }
 }

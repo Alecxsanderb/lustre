@@ -38,7 +38,12 @@ struct ContentView: View {
                         SettingsView(librarySizeInBytes: library.items.reduce(0) { $0 + $1.fileSize })
                     case .viewer(let content):
                         ViewerScreen(content: content,
-                                     preferences: AppPreferences(reading: .standard))
+                                     preferences: AppPreferences(reading: .standard),
+                                     onDisplayChange: { display in
+                                         // Last used wins: the next splat
+                                         // opens the way this one was left.
+                                         AppPreferences.ViewerDisplay.write(display, to: .standard)
+                                     })
                     }
                 }
         }
