@@ -35,6 +35,15 @@ enum SplatFileIO {
     /// is kept well below that.
     nonisolated static let maximumThumbnailSPZBytes: Int64 = 20 * 1024 * 1024
 
+    /// Watchdog limit for thumbnail reads, in one-second ticks: a stall is
+    /// declared after 3-4 idle seconds mid-stream, or 4 s with no first batch
+    /// (see `SplatStreamWatchdog.defaultStallTickLimit`). Much shorter than
+    /// the Viewer's because thumbnails render strictly one at a time, so a
+    /// damaged file blocks every tile behind it. Healthy batches arrive well
+    /// under a second apart, leaving a wide margin; a false positive only
+    /// costs a missing thumbnail, and the Viewer still gets the full limit.
+    nonisolated static let thumbnailStallTickLimit = 4
+
     nonisolated enum LoadError: LocalizedError {
         case unreadableFile(URL)
         case unsupportedFormat(URL)
@@ -129,9 +138,19 @@ enum SplatFileIO {
             }
         }
 
+        return try await thumbnailPoints(from: reader, url: url, cap: cap)
+    }
+
+    /// The streaming half of `loadThumbnailPoints`, split out so tests can
+    /// drive it with a fake reader. `url` is only used in errors.
+    nonisolated static func thumbnailPoints(from reader: SplatSceneReader,
+                                            url: URL,
+                                            cap: Int) async throws -> [SplatPoint] {
         let decimator: StrideDecimator<SplatPoint>
         do {
-            decimator = try await SplatStreamWatchdog.drain(reader, into: SplatDecimator.make(cap: cap)) {
+            decimator = try await SplatStreamWatchdog.drain(reader,
+                                                            into: SplatDecimator.make(cap: cap),
+                                                            stallTickLimit: thumbnailStallTickLimit) {
                 decimator, batch in
                 decimator.add(batch)
             }

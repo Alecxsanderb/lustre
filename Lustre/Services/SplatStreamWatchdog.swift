@@ -19,18 +19,25 @@ import SplatIO
 nonisolated enum SplatStreamWatchdog {
 
     /// Consecutive one-second ticks without a batch before the read is
-    /// declared stuck. Readers yield every few thousand points, so a healthy
-    /// read never comes close.
+    /// declared stuck, unless the caller passes its own limit. Readers yield
+    /// every few thousand points, so a healthy read never comes close. The
+    /// Viewer uses this; the thumbnail path passes a much shorter limit
+    /// because its queue is serial and a stall there holds up every tile.
     ///
     /// Counted in ticks rather than elapsed time on purpose: if the app is
     /// suspended mid-load, both tasks freeze together and a resumed tick
     /// counts once, where a clock would see the whole suspension as idle.
-    static let stallTickLimit = 20
+    ///
+    /// Granularity: ticks run on their own one-second clock and a batch only
+    /// zeroes the count, so a limit of N fires after N seconds with no first
+    /// batch, or after between N-1 and N idle seconds mid-stream.
+    static let defaultStallTickLimit = 20
 
     struct Stalled: Error {}
 
-    static func readAll(_ reader: SplatSceneReader) async throws -> [SplatPoint] {
-        try await drain(reader, into: [SplatPoint]()) { points, batch in
+    static func readAll(_ reader: SplatSceneReader,
+                        stallTickLimit: Int = defaultStallTickLimit) async throws -> [SplatPoint] {
+        try await drain(reader, into: [SplatPoint](), stallTickLimit: stallTickLimit) { points, batch in
             points.append(contentsOf: batch)
         }
     }
@@ -41,8 +48,10 @@ nonisolated enum SplatStreamWatchdog {
     static func drain<State: Sendable>(
         _ reader: SplatSceneReader,
         into initialState: State,
+        stallTickLimit: Int = defaultStallTickLimit,
         _ consume: @escaping @Sendable (inout State, [SplatPoint]) -> Void
     ) async throws -> State {
+        precondition(stallTickLimit >= 1, "A zero limit would fail every read after one second")
         let stream = try await reader.read()
         let idleTicks = OSAllocatedUnfairLock(initialState: 0)
 
