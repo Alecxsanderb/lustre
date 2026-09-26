@@ -315,8 +315,10 @@ struct ControlMenu: View {
                     .foregroundStyle(.secondary)
             }
 
+            // Disabled toggles show what's actually running, not a stored
+            // setting this device can't honor; the setting itself is kept.
             Toggle("Position indicators", isOn: Binding(
-                get: { uiState.showsPlacementIndicators },
+                get: { uiState.showsPlacementIndicators && isPlacementAvailable },
                 set: { onIndicatorsChange($0) }
             ))
             .font(.footnote)
@@ -326,12 +328,12 @@ struct ControlMenu: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            if uiState.showsPlacementIndicators {
+            if uiState.showsPlacementIndicators && isPlacementAvailable {
                 measuringControls
             }
 
             Toggle("Hide splats behind surfaces", isOn: Binding(
-                get: { uiState.occludesBehindSurfaces },
+                get: { uiState.occludesBehindSurfaces && isOcclusionAvailable },
                 set: { onOcclusionChange($0) }
             ))
             .font(.footnote)

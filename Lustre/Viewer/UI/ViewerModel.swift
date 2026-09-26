@@ -50,10 +50,6 @@ final class ViewerModel {
 
     private var memoryWarningObserver: (any NSObjectProtocol)?
 
-    /// Only file splats honor it; the sample room is authored in meters.
-    private var initialSize = AppPreferences.defaults.initialSize
-    private var lastContent: ViewerContent?
-
     /// Guards against overlapping loads. The UI already disables the import
     /// button and the quality picker while loading, but two concurrent loads
     /// would interleave `removeAllChunks` and `addChunk` on the same renderer,
@@ -66,10 +62,24 @@ final class ViewerModel {
     private var isViewerVisible = false
     private var isPoseProviderRunning = false
 
-    init() {
+    /// Only file splats honor it; the sample room is authored in meters.
+    private var initialSize = AppPreferences.defaults.initialSize
+    private var lastContent: ViewerContent?
+
+    /// Nil until `apply(_:)`. What `persistedDisplay` reports for quality:
+    /// an in-Viewer quality change lasts for this splat only.
+    private var appliedQuality: SplatQuality?
+
+    convenience init() {
+        self.init(makeProvider: Self.makeProvider(device:))
+    }
+
+    /// Tests inject a provider here to get a model with or without surfaces;
+    /// the app always goes through `init()`.
+    init(makeProvider: (MTLDevice?) -> any PoseProvider) {
         // Device first: `ARKitPoseProvider` needs it for its texture cache.
         let device = MTLCreateSystemDefaultDevice()
-        let provider = Self.makeProvider(device: device)
+        let provider = makeProvider(device)
         poseProvider = provider
         simulatedProvider = provider as? SimulatedPoseProvider
 
@@ -126,11 +136,54 @@ final class ViewerModel {
         #endif
     }
 
-    /// Takes effect on the next load. Kept out of `init` so the model doesn't
-    /// need preferences to exist, and the pose provider stays unaware of them.
+    /// Size takes effect on the next load; display settings immediately. Kept
+    /// out of `init` so the model doesn't need preferences to exist, and the
+    /// pose provider stays unaware of them.
+    ///
+    /// Copies stored values into `uiState` as they are, including ones this
+    /// device can't honor (occlusion without AR): `uiState` holds the user's
+    /// intent, and the renderer side-effects check availability. Never
+    /// writes anything back.
     func apply(_ preferences: AppPreferences) {
         initialSize = preferences.initialSize
         simulatedProvider?.metersPerSecond = preferences.joystickSpeed
+
+        let display = preferences.viewerDisplay
+        uiState.areGesturesEnabled = display.areGesturesEnabled
+        uiState.locksToSingleAxis = display.locksToSingleAxis
+        uiState.showsPlacementIndicators = display.showsPlacementIndicators
+        uiState.showsMeasuringTicks = display.showsMeasuringTicks
+        uiState.rulerUnits = display.rulerUnits
+        uiState.background = display.background
+        uiState.occludesBehindSurfaces = display.occludesBehindSurfaces
+        uiState.quality = display.quality
+        uiState.expandedSection = display.expandedSection
+        uiState.showsAdvancedRotation = display.showsAdvancedRotation
+        appliedQuality = display.quality
+        // `onAppear` does this too; repeating it here means the renderer
+        // matches `uiState` whichever order the two are called in.
+        syncRendererToUIState()
+    }
+
+    /// The display settings worth remembering, as they stand now. Nil until
+    /// `apply(_:)`, so the jump from `ViewerUIState`'s initial values to the
+    /// stored ones can be told apart from a user change and not written back.
+    ///
+    /// Quality is the value applied at open, not the live one: changing it in
+    /// the Viewer re-reads this splat but doesn't change the default.
+    var persistedDisplay: AppPreferences.ViewerDisplay? {
+        guard let appliedQuality else { return nil }
+        return AppPreferences.ViewerDisplay(
+            areGesturesEnabled: uiState.areGesturesEnabled,
+            locksToSingleAxis: uiState.locksToSingleAxis,
+            showsPlacementIndicators: uiState.showsPlacementIndicators,
+            showsMeasuringTicks: uiState.showsMeasuringTicks,
+            rulerUnits: uiState.rulerUnits,
+            background: uiState.background,
+            occludesBehindSurfaces: uiState.occludesBehindSurfaces,
+            quality: appliedQuality,
+            expandedSection: uiState.expandedSection,
+            showsAdvancedRotation: uiState.showsAdvancedRotation)
     }
 
     var statusMessage: String? { poseProvider.statusMessage }
@@ -160,6 +213,16 @@ final class ViewerModel {
     /// splats against black.
     var isOcclusionAvailable: Bool { isPlacementAvailable && isPassthroughAvailable }
 
+    /// What actually runs, as opposed to what the user asked for. A stored
+    /// setting can be on where the device can't honor it; the menu disables
+    /// the toggle there, so it must not take effect either.
+    var areIndicatorsActive: Bool { uiState.showsPlacementIndicators && isPlacementAvailable }
+
+    /// Occlusion is only armed when the camera background is actually showing.
+    var isOcclusionActive: Bool {
+        uiState.occludesBehindSurfaces && uiState.background == .camera && isOcclusionAvailable
+    }
+
     /// Chunks drawn vs. total, or nil when the splat is a single chunk and
     /// there's nothing to report.
     var cullingSummary: (visibleChunks: Int, totalChunks: Int, visibleSplats: Int)? {
@@ -181,7 +244,7 @@ final class ViewerModel {
     /// Interval one small notch on the axis bars represents, for the menu —
     /// the gizmo draws no text, so this is the only place the marks get named.
     var rulerDescription: (minor: String, major: String)? {
-        guard uiState.showsPlacementIndicators, uiState.showsMeasuringTicks else { return nil }
+        guard areIndicatorsActive, uiState.showsMeasuringTicks else { return nil }
         let ruler = RulerScale.fitting(axisLength: sceneState.indicatorAxisLength,
                                        units: uiState.rulerUnits)
         return (ruler.minorTickDescription, ruler.majorTickDescription)
@@ -235,7 +298,7 @@ final class ViewerModel {
 
     func setIndicatorsEnabled(_ enabled: Bool) {
         uiState.showsPlacementIndicators = enabled
-        renderer?.setIndicatorsEnabled(enabled)
+        renderer?.setIndicatorsEnabled(areIndicatorsActive)
         syncIndicatorStyle()
         syncSurfaceDetection()
     }
@@ -260,30 +323,38 @@ final class ViewerModel {
         renderer?.rulerUnits = uiState.showsMeasuringTicks ? uiState.rulerUnits : nil
     }
 
-    /// Occlusion is only armed when the camera background is actually showing.
     private func applyOcclusionSetting() {
-        renderer?.setOcclusionEnabled(uiState.occludesBehindSurfaces && uiState.background == .camera)
+        renderer?.setOcclusionEnabled(isOcclusionActive)
     }
 
     /// Surface detection runs only when something needs it — the indicators, an
     /// active placement, or occlusion. It costs CPU every frame otherwise.
     private func syncSurfaceDetection() {
-        let occlusionNeedsSurfaces = uiState.occludesBehindSurfaces && uiState.background == .camera
         surfaceProvider?.isSurfaceDetectionEnabled =
-            uiState.showsPlacementIndicators
+            areIndicatorsActive
             || sceneState.placementState == .awaitingSurface
-            || occlusionNeedsSurfaces
+            || isOcclusionActive
+    }
+
+    /// Pushes every display setting with a renderer or provider side-effect.
+    /// The menu's setters do this one setting at a time; a value applied at
+    /// open never went through them, so without this it would flip the UI
+    /// and nothing else.
+    private func syncRendererToUIState() {
+        renderer?.setPassthroughEnabled(uiState.background == .camera)
+        renderer?.setIndicatorsEnabled(areIndicatorsActive)
+        applyOcclusionSetting()
+        syncIndicatorStyle()
+        syncSurfaceDetection()
     }
 
     func onAppear() {
         isViewerVisible = true
         startPoseProvider()
         observeMemoryWarnings()
-        // Apply the defaults; nothing has pushed them to the renderer yet.
-        renderer?.setPassthroughEnabled(uiState.background == .camera)
-        applyOcclusionSetting()
-        syncIndicatorStyle()
-        syncSurfaceDetection()
+        // Nothing may have pushed the settings to the renderer yet. This used
+        // to skip the indicators, which only worked because they defaulted off.
+        syncRendererToUIState()
     }
 
     func onDisappear() {
