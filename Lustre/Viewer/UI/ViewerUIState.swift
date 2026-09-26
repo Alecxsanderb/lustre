@@ -14,52 +14,10 @@ import Observation
 @Observable
 final class ViewerUIState {
 
-    enum Background: String, CaseIterable, Identifiable {
-        case black
-        case camera
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .black: "Black"
-            case .camera: "Camera"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .black: "square.fill"
-            case .camera: "camera.fill"
-            }
-        }
-    }
-
-    enum Section: String, Hashable, Identifiable, CaseIterable {
-        case placement, orientation, position, display, performance
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .placement: "Scale"
-            case .orientation: "Orientation"
-            case .position: "Position"
-            case .display: "Display"
-            case .performance: "Performance"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .placement: "arrow.up.left.and.arrow.down.right"
-            case .orientation: "rotate.3d"
-            case .position: "move.3d"
-            case .display: "photo"
-            case .performance: "speedometer"
-            }
-        }
-    }
+    // Both live in Core so `AppPreferences` can store them; the aliases keep
+    // the Viewer's existing spelling.
+    typealias Background = ViewerBackground
+    typealias Section = ViewerMenuSection
 
     /// Collapsed by default so the splat is unobstructed on first look.
     var isMenuExpanded = false
