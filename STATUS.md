@@ -5,9 +5,11 @@ long-term history is git. Replace entries, don't append.
 
 ## Last updated
 - 2026-09-26
-- TestFlight: **1.0 (6) uploaded 2026-09-26** (`80b5bb4`: placement and
-  depth-drag fixes), not yet tested on device. 1.0 (5) (step 3 Settings) was
-  device-tested 2026-09-26 and produced the bug reports fixed in 6. The project file stays at build 1: uploads let App Store
+- TestFlight: **1.0 (7) uploaded 2026-09-26** (`40f90c1`: placement and
+  depth-drag fixes, Viewer display defaults, Library thumbnails), not yet
+  tested on device. 1.0 (6) had only the placement/depth fixes. 1.0 (5)
+  (step 3 Settings) was device-tested 2026-09-26 and produced the bug reports
+  addressed since. The project file stays at build 1: uploads let App Store
   Connect assign the build number (`manageAppVersionAndBuildNumber`).
 
 ## Current focus
@@ -149,7 +151,7 @@ step 4 (Capture: locked camera mode).
    table vs floor, background then resume with a placed splat, a large
    capture for culling pop-in.
 2. Confirm SPZ and `.splat` loading (may already be covered by the device run).
-3. On device (1.0 (6)): placement overlay goes Starting tracking → Place
+3. On device (1.0 (7)): placement overlay goes Starting tracking → Place
    anyway → Place; Place anyway works; drag, dolly, and nudges follow the
    camera heading after placing on a detected surface (try a sloped one).
    Also try recenter then re-place (see Suspected issues).
