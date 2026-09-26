@@ -37,3 +37,15 @@ nonisolated struct ThumbnailKey: Hashable, Sendable {
                   rendererVersion: rendererVersion)
     }
 }
+
+extension ThumbnailKey {
+
+    /// The key for a library item as it was last scanned, at the current
+    /// renderer version. Pure, so it's cheap enough for a view body.
+    nonisolated init(item: SplatItem) {
+        self.init(fileName: item.url.lastPathComponent,
+                  fileSize: item.fileSize,
+                  modificationDate: item.modificationDate,
+                  rendererVersion: ThumbnailRenderer.version)
+    }
+}

@@ -22,6 +22,16 @@ struct ContentView: View {
 
     @State private var path: [Route] = []
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.thumbnailStore) private var thumbnails
+
+    /// Thumbnails pause while any Viewer is on the stack: the Viewer needs
+    /// the memory and GPU, and the tiles aren't visible anyway.
+    private var isViewerOpen: Bool {
+        path.contains { route in
+            if case .viewer = route { return true }
+            return false
+        }
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -46,6 +56,9 @@ struct ContentView: View {
                                      })
                     }
                 }
+        }
+        .onChange(of: isViewerOpen) { _, open in
+            thumbnails?.setPaused(open)
         }
         .onChange(of: scenePhase) { _, phase in
             // Files may have added or removed splats while we were away.

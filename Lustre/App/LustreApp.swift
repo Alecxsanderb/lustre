@@ -11,10 +11,13 @@ import SwiftUI
 struct LustreApp: App {
     /// One library for the app's lifetime; Home and Library both read it.
     @State private var library = SplatLibrary()
+    /// One generator and memory cache for every thumbnail on screen.
+    @State private var thumbnails = ThumbnailStore()
 
     var body: some Scene {
         WindowGroup {
             ContentView(library: library)
+                .environment(\.thumbnailStore, thumbnails)
         }
     }
 }

@@ -24,6 +24,9 @@ nonisolated struct SplatItem: Identifiable, Hashable, Sendable {
     let source: Source
     let dateAdded: Date
     let fileSize: Int64
+    /// The file's content modification date. Kept so a thumbnail key (name,
+    /// size, mtime) can be built in a view body without touching the disk.
+    let modificationDate: Date
     let lastOpened: Date?
 
     var id: URL { url }

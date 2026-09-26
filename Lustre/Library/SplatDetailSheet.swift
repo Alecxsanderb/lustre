@@ -35,7 +35,7 @@ struct SplatDetailSheet: View {
             List {
                 Section {
                     // Capped so the metadata is visible at the medium detent.
-                    SplatThumbnailPlaceholder(item: item)
+                    SplatThumbnail(item: item)
                         .frame(height: 140)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)

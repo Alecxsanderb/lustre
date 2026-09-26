@@ -17,6 +17,7 @@ struct LibrarySortTests {
                   source: .imported,
                   dateAdded: Date(timeIntervalSinceReferenceDate: added),
                   fileSize: size,
+                  modificationDate: Date(timeIntervalSinceReferenceDate: added),
                   lastOpened: nil)
     }
 

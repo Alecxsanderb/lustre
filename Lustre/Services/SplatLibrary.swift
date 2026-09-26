@@ -79,7 +79,7 @@ final class SplatLibrary {
             try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true)
             let urls = try fileManager.contentsOfDirectory(
                 at: folderURL,
-                includingPropertiesForKeys: [.fileSizeKey, .creationDateKey, .isRegularFileKey],
+                includingPropertiesForKeys: Self.resourceKeys,
                 options: [.skipsHiddenFiles])
             storageError = nil
             items = urls.compactMap(makeItem)
@@ -101,7 +101,7 @@ final class SplatLibrary {
 
     private func makeItem(for url: URL) -> SplatItem? {
         guard SplatFileIO.readableExtensions.contains(url.pathExtension.lowercased()),
-              let values = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey, .isRegularFileKey]),
+              let values = try? url.resourceValues(forKeys: Set(Self.resourceKeys)),
               values.isRegularFile == true else { return nil }
 
         // A file dropped in through Files has no entry; it was imported, just
@@ -111,8 +111,13 @@ final class SplatLibrary {
                          source: entry?.source ?? .imported,
                          dateAdded: entry?.dateAdded ?? values.creationDate ?? .now,
                          fileSize: Int64(values.fileSize ?? 0),
+                         modificationDate: values.contentModificationDate ?? .distantPast,
                          lastOpened: entry?.lastOpened)
     }
+
+    /// Prefetched by the directory listing, so `makeItem` costs no extra stat.
+    private static let resourceKeys: [URLResourceKey] = [.fileSizeKey, .creationDateKey,
+                                                         .contentModificationDateKey, .isRegularFileKey]
 
     // MARK: - Mutations
 
@@ -237,6 +242,7 @@ final class SplatLibrary {
             let current = items[position]
             items[position] = SplatItem(url: current.url, source: current.source,
                                         dateAdded: current.dateAdded, fileSize: current.fileSize,
+                                        modificationDate: current.modificationDate,
                                         lastOpened: entry.lastOpened)
         }
     }
