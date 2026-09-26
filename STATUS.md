@@ -141,7 +141,8 @@ mode), after the on-device pass below.
    one at a time, paused while the Viewer is open; JPEG cache in
    `Caches/Thumbnails/` keyed by name+size+mtime+renderer version; generated
    on first display; `.failed` markers for damaged files. Decisions: skip SPZ
-   files over ~50 MB (whole-file decompression peak); exterior 3/4 framing
+   files over ~20 MB (SPZSceneReader unpacks every point with full SH before
+   decimation; 50 MB could peak at 0.5-1 GB — lowered 2026-09-26); exterior 3/4 framing
    accepted for v1 even though interior captures will look like a shell.
    Estimated 600-800 lines, 3-4 sessions.
 6. Then ROADMAP Build order step 4 (Capture: locked camera mode).
