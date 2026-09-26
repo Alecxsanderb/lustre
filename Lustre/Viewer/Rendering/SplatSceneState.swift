@@ -151,23 +151,15 @@ final class SplatSceneState {
 
     // MARK: - Transform
 
-    /// Model-to-world transform handed to the renderer each frame.
-    ///
-    /// Read right to left: recenter the asset on its own pivot, apply the
-    /// canonical up-flip, scale, apply user rotation, then place it. The pivot
-    /// bracket is what makes scale and rotation act *in place*.
-    ///
-    /// Scale and the up-calibration commute because the scale is uniform, so
-    /// their relative order is arbitrary; a test pins the rest of the order.
+    /// Model-to-world transform handed to the renderer each frame. The order
+    /// is documented (and shared with Library thumbnails) in
+    /// `SplatModelTransform`.
     var modelMatrix: simd_float4x4 {
-        var matrix = matrix4x4_translation(translation)
-        matrix *= rotationMatrix
-        matrix *= matrix4x4_scale(SplatScale.clamp(scale))
-        if appliesUpCalibration {
-            matrix *= matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
-        }
-        matrix *= matrix4x4_translation(-pivot)
-        return matrix
+        SplatModelTransform.matrix(pivot: pivot,
+                                   appliesUpCalibration: appliesUpCalibration,
+                                   scale: SplatScale.clamp(scale),
+                                   rotation: rotationMatrix,
+                                   translation: translation)
     }
 
     /// Intrinsic Y-X-Z. Euler rather than a quaternion because the yaw slider
