@@ -51,7 +51,9 @@ nonisolated protocol ThumbnailRenderBackend: AnyObject, Sendable {
 
 /// What the generator needs from a renderer, so it can be stubbed too.
 nonisolated protocol ThumbnailRendering: AnyObject, Sendable {
-    func renderJPEG(points: [SplatPoint]) async throws -> Data
+    /// `@concurrent` so framing and JPEG encoding never run on the caller's
+    /// actor (the generator's, or the main actor).
+    @concurrent func renderJPEG(points: [SplatPoint]) async throws -> Data
 }
 
 nonisolated final class ThumbnailRenderer: ThumbnailRendering {
@@ -90,7 +92,7 @@ nonisolated final class ThumbnailRenderer: ThumbnailRendering {
         try self.init(backend: MetalThumbnailBackend(width: Self.width, height: Self.height))
     }
 
-    func renderJPEG(points: [SplatPoint]) async throws -> Data {
+    @concurrent func renderJPEG(points: [SplatPoint]) async throws -> Data {
         let image = try await renderImage(points: points)
         guard let data = Self.jpegData(from: image, quality: Self.jpegQuality) else {
             throw RenderError.encodingFailed
