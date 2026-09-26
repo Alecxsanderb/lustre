@@ -16,6 +16,15 @@ ROADMAP Build order **steps 2 (Library + Home) and 3 (Settings) are merged to
 mode), after the on-device pass below.
 
 ## Recently done
+- **2026-09-26, Viewer display defaults** (`6461ed9`..`d10f351`). Touch
+  controls, axis lock, indicators, ticks, units (locale default), background,
+  and occlusion are stored; Viewer menu changes write back ("last used wins")
+  and Settings › Viewer Display edits the same values. Detail is a Settings
+  default only (in-Viewer change lasts for that splat). Stored intent survives
+  unavailability (no AR doesn't clear occlusion). Fixed the latent bug where
+  indicators on at open never drew. Verified in the simulator by tapping:
+  toggling axis lock in the Viewer writes it, and the next splat opens with it
+  on. code-reviewer: no blocking findings. **Not verified on device.**
 - **2026-09-26, placement + depth-drag fixes (from the 1.0 (5) device test).**
   `775386c`: the placement overlay was drawn once and never updated on device
   (it read an unobserved ARKit poll), so Place / Place anyway stayed disabled;
@@ -125,16 +134,8 @@ mode), after the on-device pass below.
    Also try recenter then re-place (see Suspected issues).
    Plus: try each Initial size preset with tap-to-place, and confirm
    the Simulator section is absent from the TestFlight build.
-4. **Viewer display defaults** (user request from the 1.0 (5) device test:
-   switching splats resets toggles). Planned 2026-09-26: one stored value per
-   setting; Viewer menu changes write back ("last used wins") and a Settings
-   "Viewer Display" section edits the same values. Persisted: touch controls,
-   axis lock, indicators, ticks, units (locale default), background,
-   occlusion; last-used only: expanded section, advanced rotation. Detail
-   (quality) is a Settings default only; in-Viewer changes last for that
-   splat. Save user intent, not availability. Also fixes `onAppear` never
-   calling `setIndicatorsEnabled` (latent: indicators defaulting on wouldn't
-   draw).
+4. On device: Viewer display defaults (see Recently done) carry over
+   between splats and match Settings; a fresh US-region install opens in feet.
 5. **Library thumbnails.** Planned 2026-09-26: offscreen MetalSplatter render
    of a stride-decimated (~300k, SH0-only) subsample in `Services/Thumbnails/`,
    one at a time, paused while the Viewer is open; JPEG cache in
