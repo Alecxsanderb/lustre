@@ -57,7 +57,8 @@ final class SplatSceneState {
     /// Uniform scale. `1.0` means "as authored" — see `SplatScale.authored`.
     var scale: Float = SplatScale.authored
 
-    /// Where the splat's center sits in world space, in meters.
+    /// Where the splat's center sits relative to its anchor, in meters and in
+    /// the anchor's axes — the renderer composes `anchor * modelMatrix`.
     var translation: SIMD3<Float> = .zero
 
     /// Rotation about world up. The primary orientation control.

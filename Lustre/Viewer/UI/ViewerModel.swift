@@ -135,8 +135,21 @@ final class ViewerModel {
 
     var statusMessage: String? { poseProvider.statusMessage }
 
-    /// Camera-to-world, for building a `CameraRelativeBasis` at gesture start.
-    var cameraTransform: simd_float4x4 { poseProvider.pose.transform }
+    /// The camera in the anchor's frame, for building a `CameraRelativeBasis`
+    /// in gestures and nudges.
+    ///
+    /// Not camera-to-world: the renderer composes `anchor * modelMatrix`, so
+    /// `sceneState.translation` lives in the anchor's local frame. ARKit
+    /// raycast hits on horizontal planes carry an arbitrary yaw, and a
+    /// world-space delta added to a local translation came out rotated by it —
+    /// drags went off the camera heading, but only for surface placements.
+    ///
+    /// Those anchors are gravity-aligned (rotation about Y only), so the local
+    /// +Y is still world up and the basis's flattening stays valid.
+    var cameraTransformInAnchorSpace: simd_float4x4 {
+        CameraRelativeBasis.cameraTransform(poseProvider.pose.transform,
+                                            inFrameOf: currentAnchorTransform)
+    }
 
     var isPassthroughAvailable: Bool { renderer?.isPassthroughAvailable ?? false }
 

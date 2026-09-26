@@ -34,7 +34,8 @@ struct SplatGestureLayer: UIViewRepresentable {
     var isEnabled: Bool
     /// When true, one two-finger gesture changes one thing.
     var locksToSingleAxis: Bool
-    /// Camera-to-world, read once per gesture to build a stable axis basis.
+    /// The camera in the frame `sceneState.translation` lives in (the
+    /// anchor's, not world), read once per gesture to build a stable basis.
     var cameraTransform: () -> simd_float4x4
 
     func makeCoordinator() -> Coordinator {
@@ -209,7 +210,7 @@ struct SplatGestureLayer: UIViewRepresentable {
         }
 
         /// Horizontal drag slides the splat along the camera's flattened
-        /// heading; vertical drag raises and lowers it in world space. Under
+        /// heading; vertical drag raises and lowers it along world up. Under
         /// axis lock only whichever of those the drag started as applies.
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
             switch recognizer.state {

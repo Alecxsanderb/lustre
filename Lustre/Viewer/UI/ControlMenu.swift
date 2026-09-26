@@ -23,8 +23,9 @@ struct ControlMenu: View {
     /// this is where the notches get their units.
     var rulerDescription: (minor: String, major: String)?
     var cullingSummary: (visibleChunks: Int, totalChunks: Int, visibleSplats: Int)?
-    /// Camera-to-world, read per tap so nudges follow the direction the user
-    /// is facing, matching the drag gestures.
+    /// The camera in the frame `sceneState.translation` lives in (the
+    /// anchor's), read per tap so nudges follow the direction the user is
+    /// facing, matching the drag gestures.
     var cameraTransform: () -> simd_float4x4
 
     var onRecenter: () -> Void
@@ -278,7 +279,7 @@ struct ControlMenu: View {
 
     /// Amounts are in steps along the camera-relative basis, so "left" means
     /// the user's left wherever they're facing. The x/y/z readout stays in
-    /// world axes because that's what the translation actually stores.
+    /// the anchor's axes because that's what the translation actually stores.
     private func nudgeButton(_ systemImage: String, label: String,
                              right: Float = 0, up: Float = 0, forward: Float = 0) -> some View {
         Button {

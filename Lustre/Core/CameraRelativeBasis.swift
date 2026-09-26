@@ -53,7 +53,24 @@ nonisolated struct CameraRelativeBasis: Equatable, Sendable {
         right = simd_normalize(simd_cross(forward, Self.worldUp))
     }
 
-    /// Composes a world-space offset from camera-relative components, in meters.
+    /// Re-expresses a camera-to-world transform in the frame of `parent`
+    /// (parent-to-world), so a basis built from it yields offsets in
+    /// `parent`'s local axes.
+    ///
+    /// Needed whenever the offset is added to a position that lives in a
+    /// child frame rather than in world space: a world-space delta added to a
+    /// local position comes out rotated by the parent's rotation.
+    ///
+    /// The flattening in `init(cameraTransform:)` still holds as long as the
+    /// parent's +Y is world up, i.e. the parent only rotates about Y.
+    static func cameraTransform(_ cameraTransform: simd_float4x4,
+                                inFrameOf parent: simd_float4x4) -> simd_float4x4 {
+        simd_inverse(parent) * cameraTransform
+    }
+
+    /// Composes an offset from camera-relative components, in meters, in the
+    /// frame the camera transform was given in: world, unless it came through
+    /// `cameraTransform(_:inFrameOf:)`.
     func worldDelta(right rightAmount: Float,
                     up upAmount: Float,
                     forward forwardAmount: Float) -> SIMD3<Float> {

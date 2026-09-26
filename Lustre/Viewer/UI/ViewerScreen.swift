@@ -34,7 +34,7 @@ struct ViewerScreen: View {
                               isEnabled: model.uiState.areGesturesEnabled
                                   && !model.sceneState.loadState.isLoading,
                               locksToSingleAxis: model.uiState.locksToSingleAxis,
-                              cameraTransform: { model.cameraTransform })
+                              cameraTransform: { model.cameraTransformInAnchorSpace })
                 .ignoresSafeArea()
 
             if let initializationError = model.initializationError {
@@ -61,7 +61,7 @@ struct ViewerScreen: View {
                                 isOcclusionAvailable: model.isOcclusionAvailable,
                                 rulerDescription: model.rulerDescription,
                                 cullingSummary: model.cullingSummary,
-                                cameraTransform: { model.cameraTransform },
+                                cameraTransform: { model.cameraTransformInAnchorSpace },
                                 onRecenter: model.recenter,
                                 onBackgroundChange: model.setBackground,
                                 onReplace: model.beginPlacement,
