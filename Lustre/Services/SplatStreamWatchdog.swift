@@ -30,20 +30,33 @@ nonisolated enum SplatStreamWatchdog {
     struct Stalled: Error {}
 
     static func readAll(_ reader: SplatSceneReader) async throws -> [SplatPoint] {
+        try await drain(reader, into: [SplatPoint]()) { points, batch in
+            points.append(contentsOf: batch)
+        }
+    }
+
+    /// Feeds every batch to `consume` as it arrives instead of collecting
+    /// them, so a caller that keeps only some points (thumbnail decimation)
+    /// never holds the whole file. Same stall protection as `readAll`.
+    static func drain<State: Sendable>(
+        _ reader: SplatSceneReader,
+        into initialState: State,
+        _ consume: @escaping @Sendable (inout State, [SplatPoint]) -> Void
+    ) async throws -> State {
         let stream = try await reader.read()
         let idleTicks = OSAllocatedUnfairLock(initialState: 0)
 
-        return try await withThrowingTaskGroup(of: [SplatPoint].self) { group in
+        return try await withThrowingTaskGroup(of: State.self) { group in
             group.addTask {
-                var points: [SplatPoint] = []
+                var state = initialState
                 for try await batch in stream {
-                    points.append(contentsOf: batch)
+                    consume(&state, batch)
                     idleTicks.withLock { $0 = 0 }
                 }
                 // A cancelled stream ends like a finished one; don't pass off
                 // a partial read as complete.
                 try Task.checkCancellation()
-                return points
+                return state
             }
             group.addTask {
                 while true {
@@ -56,14 +69,14 @@ nonisolated enum SplatStreamWatchdog {
                 }
             }
 
-            // Whichever finishes first decides: the points, or a stall. Either
+            // Whichever finishes first decides: the result, or a stall. Either
             // way the other task is no longer wanted. Cancelling the reader
             // task also terminates the stalled stream, releasing it.
             defer { group.cancelAll() }
-            guard let points = try await group.next() else {
+            guard let state = try await group.next() else {
                 throw CancellationError()
             }
-            return points
+            return state
         }
     }
 }
