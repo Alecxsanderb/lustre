@@ -103,12 +103,16 @@ that can be regenerated.
 **Dependencies:** Core (Splat model), Services (file I/O, sharing)
 
 **Open questions:**
-- Thumbnails: render on first view, cache to disk? Background queue?
+- ~~Thumbnails: render on first view, cache to disk? Background queue?~~
+  Answered: first display, disk cache in Caches, one serial background worker.
 - Folders/tags/collections — probably no for v1.
 
 **Status:** Basic version built (step 2): grid, import, rename, delete,
-share (original file), sort. Not yet: thumbnails (placeholder tiles until
-the polish pass), format conversion on export.
+share (original file), sort. Thumbnails built 2026-09-26, pulled forward from
+the polish pass: offscreen MetalSplatter render of a ≤300k-point subsample,
+cached as JPEG in `Caches/Thumbnails/`, generated on first display, paused
+while the Viewer is open; SPZ over 20 MB keeps the placeholder. Not yet:
+format conversion on export.
 
 ---
 
@@ -315,7 +319,10 @@ or `@AppStorage` wrapper)
 
 **Status:** Minimal version built (step 3): Initial size preset (Tabletop /
 Dollhouse / Room / Life size, which Reset also returns to), a simulator-only
-joystick speed, library storage total, and version/build. "Movement speed"
+joystick speed, library storage total, and version/build. Viewer Display
+defaults added 2026-09-26: touch controls, axis lock, indicators, ticks,
+units, background, occlusion, and default detail; changes in the Viewer's
+menu write back, so the next splat opens the same way. "Movement speed"
 became simulator-only because on device you move by walking. Preferences live
 in `Services/AppPreferences`; `ContentView` injects them into the Viewer.
 Otherwise, build incrementally as features need it; don't front-load.
@@ -339,7 +346,9 @@ Cross-feature services:
   `Documents/Splats/` (built in step 2)
 - `SplatIO` — format-specific loading. MetalSplatter handles most of this;
   this is a thin app-side wrapper
-- `ThumbnailGenerator` — render preview images for Library
+- `ThumbnailGenerator` — render preview images for Library (built:
+  `Services/Thumbnails/`, with `ThumbnailRenderer`, `ThumbnailCache`, and
+  `ThumbnailStore`)
 - `SharingService` — wrap `UIActivityViewController` for export flows
 
 ### Components
@@ -368,6 +377,7 @@ Each step ends with something runnable and testable:
 6. **Capture: live coaching.** Motion analysis, real-time warnings.
 7. **Capture: multi-clip.** Pause/resume, splicing.
 8. **Polish pass.** Onboarding, sharing flow, Library improvements.
+   (Thumbnails already done, pulled forward.)
 9. **Training.** Research phase. Far future.
 
 Every step from 1 onward is shippable to TestFlight. Important for the

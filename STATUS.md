@@ -4,7 +4,7 @@ Snapshot of where things stand. Plan and build order live in ROADMAP.md;
 long-term history is git. Replace entries, don't append.
 
 ## Last updated
-- 2026-09-25
+- 2026-09-26
 - TestFlight: **1.0 (6) uploaded 2026-09-26** (`80b5bb4`: placement and
   depth-drag fixes), not yet tested on device. 1.0 (5) (step 3 Settings) was
   device-tested 2026-09-26 and produced the bug reports fixed in 6. The project file stays at build 1: uploads let App Store
@@ -12,10 +12,28 @@ long-term history is git. Replace entries, don't append.
 
 ## Current focus
 ROADMAP Build order **steps 2 (Library + Home) and 3 (Settings) are merged to
-`main`** and verified in the simulator. Next is step 4 (Capture: locked camera
-mode), after the on-device pass below.
+`main`**, plus the fixes and features from the 1.0 (5) device test: placement
+overlay, depth-drag axes, Viewer display defaults, and Library thumbnails
+(pulled forward from the polish pass at the user's request). All verified in
+the simulator; none yet on device. Next is the on-device pass below, then
+step 4 (Capture: locked camera mode).
 
 ## Recently done
+- **2026-09-26, Library thumbnails** (`fe2933c`..`bcf495f`). Offscreen
+  MetalSplatter render (`Services/Thumbnails/`) of a stride-decimated subsample
+  (≤300k points, SH0 only), 480×360 JPEG in `Caches/Thumbnails/` keyed by
+  name+size+mtime+renderer version, generated on first display, one file at a
+  time, paused while a Viewer is on the stack. Damaged files get a `.failed`
+  marker and keep the tinted tile; SPZ over 20 MB is skipped. Rename moves the
+  cached image; refresh sweeps orphans. Viewer and thumbnails share
+  `Core/SplatModelTransform`, so orientation matches. Thumbnail reads stall out
+  after ~4 s (Viewer keeps 20 s) so one bad file doesn't block the grid.
+  PLYPreflight now fails `element vertex 0` fast instead of hanging 20 s.
+  Verified in the simulator by tapping: Home and Library show previews for
+  valid files and plain tiles for the four damaged test files; opening a
+  splat mid-session and returning works. code-reviewer: no blockers.
+  **Not verified:** real captures (test files are small synthetic spheres),
+  device memory/jank, render time.
 - **2026-09-26, Viewer display defaults** (`6461ed9`..`d10f351`). Touch
   controls, axis lock, indicators, ticks, units (locale default), background,
   and occlusion are stored; Viewer menu changes write back ("last used wins")
@@ -93,8 +111,6 @@ mode), after the on-device pass below.
 - **MetalSplatter's PLY reader hangs on body errors** (upstream bug in
   1.0.1, still on `main`; worked around app-side, see Recently done). Issue
   not filed yet; draft text exists.
-- **No thumbnails.** Library/Home show tinted placeholder tiles; deferred to
-  the polish pass by decision.
 - **Viewer nav title is black on the black background** when passthrough is
   off (pre-existing; used to say "Viewer", now the splat name).
 - **Picker offers formats the parser can't read (SOG).** Deliberate, so the
@@ -103,6 +119,11 @@ mode), after the on-device pass below.
   SPZ, or .splat."
 
 ## Suspected issues
+- **Thumbnail pause isn't a hard barrier before the Viewer's load.**
+  ContentView pauses the generator when a Viewer is pushed, but the Viewer's
+  load doesn't await that; a render already in flight finishes. Overlap is
+  bounded to one decimated scene (tens of MB), per code review. Confirm:
+  open a large splat while a thumbnail is generating, watch memory on device.
 - **Recenter probably misaligns the splat on device.** `ARKitPoseProvider.recenter()`
   folds an offset into `pose`, but raycast hits, the fallback candidate, and
   `ARAnchor` transforms stay in raw ARKit world space, so after a recenter the
@@ -136,15 +157,9 @@ mode), after the on-device pass below.
    the Simulator section is absent from the TestFlight build.
 4. On device: Viewer display defaults (see Recently done) carry over
    between splats and match Settings; a fresh US-region install opens in feet.
-5. **Library thumbnails.** Planned 2026-09-26: offscreen MetalSplatter render
-   of a stride-decimated (~300k, SH0-only) subsample in `Services/Thumbnails/`,
-   one at a time, paused while the Viewer is open; JPEG cache in
-   `Caches/Thumbnails/` keyed by name+size+mtime+renderer version; generated
-   on first display; `.failed` markers for damaged files. Decisions: skip SPZ
-   files over ~20 MB (SPZSceneReader unpacks every point with full SH before
-   decimation; 50 MB could peak at 0.5-1 GB — lowered 2026-09-26); exterior 3/4 framing
-   accepted for v1 even though interior captures will look like a shell.
-   Estimated 600-800 lines, 3-4 sessions.
+5. On device: Library/Home previews appear for real captures; watch memory
+   and scrolling jank while a multi-million-splat PLY or a just-under-20 MB
+   SPZ generates; opening the Viewer mid-generation doesn't stutter or crash.
 6. Then ROADMAP Build order step 4 (Capture: locked camera mode).
 
 ## Open questions
