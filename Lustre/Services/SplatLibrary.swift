@@ -48,10 +48,16 @@ final class SplatLibrary {
     private let indexURL: URL
     private var index: [String: IndexEntry] = [:]
 
+    /// Kept in step with the folder: renames carry their thumbnail along,
+    /// and every refresh sweeps entries no current file maps to.
+    private let thumbnailCache: ThumbnailCache?
+
     init(folderURL: URL = SplatLibrary.defaultFolderURL,
-         indexURL: URL = SplatLibrary.defaultIndexURL) {
+         indexURL: URL = SplatLibrary.defaultIndexURL,
+         thumbnailCache: ThumbnailCache? = ThumbnailCache(directory: ThumbnailCache.defaultDirectory)) {
         self.folderURL = folderURL
         self.indexURL = indexURL
+        self.thumbnailCache = thumbnailCache
         index = Self.readIndex(at: indexURL)
         refresh()
     }
@@ -96,6 +102,33 @@ final class SplatLibrary {
         if !stale.isEmpty {
             stale.forEach { index.removeValue(forKey: $0) }
             writeIndex()
+        }
+
+        sweepThumbnails()
+    }
+
+    /// Deletes thumbnails for files that are gone or changed, off the main
+    /// actor: it lists and deletes in Caches, which scales with history, not
+    /// with what's on screen. A thumbnail the generator writes after this
+    /// snapshot for a file added after it can be swept too; it regenerates.
+    private func sweepThumbnails() {
+        guard let thumbnailCache else { return }
+        let liveKeys = Set(items.map(ThumbnailKey.init(item:)))
+        cacheMaintenance.async {
+            thumbnailCache.sweep(keeping: liveKeys)
+        }
+    }
+
+    /// Serial, so sweeps and rename moves apply in the order they were
+    /// issued. Without it, a sweep holding an older snapshot of the folder
+    /// could list the cache after a rename's move and delete the moved entry.
+    private let cacheMaintenance = DispatchQueue(label: "com.alecborer.lustre.thumbnail-maintenance",
+                                                 qos: .utility)
+
+    /// Returns once every cache move and sweep issued so far has run.
+    func waitForThumbnailMaintenance() async {
+        await withCheckedContinuation { continuation in
+            cacheMaintenance.async { continuation.resume() }
         }
     }
 
@@ -220,6 +253,19 @@ final class SplatLibrary {
             throw SplatFileNaming.RenameError.alreadyExists(name)
         }
         try FileManager.default.moveItem(at: item.url, to: destination)
+
+        // A rename keeps size and mtime, so the thumbnail is still right;
+        // only the key's name part changed. Queued before `refresh()` queues
+        // its sweep, which would otherwise delete the old key's entry.
+        if let thumbnailCache {
+            let oldKey = ThumbnailKey(item: item)
+            let newKey = ThumbnailKey(fileName: newFileName, fileSize: item.fileSize,
+                                      modificationDate: item.modificationDate,
+                                      rendererVersion: ThumbnailRenderer.version)
+            cacheMaintenance.async {
+                try? thumbnailCache.move(from: oldKey, to: newKey)
+            }
+        }
 
         if let entry = index.removeValue(forKey: oldFileName) {
             index[newFileName] = entry
