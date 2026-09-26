@@ -5,9 +5,9 @@ long-term history is git. Replace entries, don't append.
 
 ## Last updated
 - 2026-09-25
-- TestFlight: **1.0 (5) uploaded 2026-09-25** (step 3 Settings, `aa46aed`),
-  not yet tested on device. The previous upload was build 4, the one installed
-  on 2026-09-24. The project file stays at build 1: uploads let App Store
+- TestFlight: **1.0 (6) uploaded 2026-09-26** (`80b5bb4`: placement and
+  depth-drag fixes), not yet tested on device. 1.0 (5) (step 3 Settings) was
+  device-tested 2026-09-26 and produced the bug reports fixed in 6. The project file stays at build 1: uploads let App Store
   Connect assign the build number (`manageAppVersionAndBuildNumber`).
 
 ## Current focus
@@ -22,7 +22,9 @@ mode), after the on-device pass below.
   it now follows an observed readiness state. `7b68b7b`: drags and nudge
   arrows applied world-space deltas to an anchor-local translation, so an
   ARKit raycast anchor's yaw rotated them; the axes are now built in anchor
-  space. Unit-tested and simulator-checked (overlay updates on its own).
+  space. `80b5bb4` (after code review): the basis is built in world space and
+  then mapped into the anchor, so a tilted surface anchor doesn't skew drags.
+  Unit-tested and simulator-checked (overlay updates on its own).
   **Not verified on device yet.**
 - **2026-09-25, step 3 Settings + test target.** `LustreTests` (hosted, Swift
   Testing, shared `Lustre` scheme; 150 tests pass) covers PLYPreflight,
@@ -117,7 +119,11 @@ mode), after the on-device pass below.
    table vs floor, background then resume with a placed splat, a large
    capture for culling pop-in.
 2. Confirm SPZ and `.splat` loading (may already be covered by the device run).
-3. On device: try each Initial size preset with tap-to-place, and confirm
+3. On device (1.0 (6)): placement overlay goes Starting tracking → Place
+   anyway → Place; Place anyway works; drag, dolly, and nudges follow the
+   camera heading after placing on a detected surface (try a sloped one).
+   Also try recenter then re-place (see Suspected issues).
+   Plus: try each Initial size preset with tap-to-place, and confirm
    the Simulator section is absent from the TestFlight build.
 4. **Viewer display defaults** (user request from the 1.0 (5) device test:
    switching splats resets toggles). Planned 2026-09-26: one stored value per
