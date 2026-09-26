@@ -248,10 +248,13 @@ round-trip exactly, and extracting yaw from a quaternion with non-zero
 pitch/roll is lossy, so the slider would drift as the gesture is used. Yaw is
 primary; pitch and roll are behind a disclosure.
 
-Translation is stored in **world** space but *input* is camera-relative via
+Translation is stored in the **anchor's** local frame (the renderer composes
+`anchor * modelMatrix`) but *input* is camera-relative via
 `CameraRelativeBasis`, snapshotted at gesture start so the axes can't rotate
-mid-drag. Forward is flattened to the XZ plane (legitimate because
-`worldAlignment = .gravity`); vertical is always world up.
+mid-drag. The basis is built in world space — forward flattened to the XZ plane
+(legitimate because `worldAlignment = .gravity`), vertical world up — and then
+expressed in the anchor's frame (`ViewerModel.makeGestureBasis()`), so it stays
+gravity-true even when a raycast anchor is yawed or tilted with its surface.
 
 Gestures are all two-finger — pinch to scale, rotate to yaw, pan to translate —
 because `VirtualJoystick` already owns single-finger drags and `NavigationStack`

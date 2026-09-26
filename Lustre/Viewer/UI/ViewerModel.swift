@@ -135,20 +135,20 @@ final class ViewerModel {
 
     var statusMessage: String? { poseProvider.statusMessage }
 
-    /// The camera in the anchor's frame, for building a `CameraRelativeBasis`
-    /// in gestures and nudges.
+    /// A camera-relative basis for gestures and nudges, expressed in the
+    /// frame `sceneState.translation` lives in.
     ///
-    /// Not camera-to-world: the renderer composes `anchor * modelMatrix`, so
-    /// `sceneState.translation` lives in the anchor's local frame. ARKit
-    /// raycast hits on horizontal planes carry an arbitrary yaw, and a
-    /// world-space delta added to a local translation came out rotated by it —
-    /// drags went off the camera heading, but only for surface placements.
+    /// The renderer composes `anchor * modelMatrix`, so the translation is
+    /// anchor-local. ARKit raycast hits carry an arbitrary yaw and can be
+    /// tilted a few degrees with the surface, so a world-space delta added to
+    /// the local translation comes out rotated by the anchor. The basis is
+    /// built from the world camera (gravity-true heading, world up) and then
+    /// mapped into the anchor's frame.
     ///
-    /// Those anchors are gravity-aligned (rotation about Y only), so the local
-    /// +Y is still world up and the basis's flattening stays valid.
-    var cameraTransformInAnchorSpace: simd_float4x4 {
-        CameraRelativeBasis.cameraTransform(poseProvider.pose.transform,
-                                            inFrameOf: currentAnchorTransform)
+    /// Callers snapshot it once at gesture start.
+    func makeGestureBasis() -> CameraRelativeBasis {
+        CameraRelativeBasis(cameraTransform: poseProvider.pose.transform,
+                            expressedIn: currentAnchorTransform)
     }
 
     var isPassthroughAvailable: Bool { renderer?.isPassthroughAvailable ?? false }

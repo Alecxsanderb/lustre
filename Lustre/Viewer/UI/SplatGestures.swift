@@ -34,12 +34,12 @@ struct SplatGestureLayer: UIViewRepresentable {
     var isEnabled: Bool
     /// When true, one two-finger gesture changes one thing.
     var locksToSingleAxis: Bool
-    /// The camera in the frame `sceneState.translation` lives in (the
-    /// anchor's, not world), read once per gesture to build a stable basis.
-    var cameraTransform: () -> simd_float4x4
+    /// A camera-relative basis in the frame `sceneState.translation` lives
+    /// in, called once per gesture so the axes stay stable.
+    var makeBasis: () -> CameraRelativeBasis
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(sceneState: sceneState, cameraTransform: cameraTransform)
+        Coordinator(sceneState: sceneState, makeBasis: makeBasis)
     }
 
     func makeUIView(context: Context) -> UIView {
@@ -80,7 +80,7 @@ struct SplatGestureLayer: UIViewRepresentable {
 
     func updateUIView(_ view: UIView, context: Context) {
         context.coordinator.sceneState = sceneState
-        context.coordinator.cameraTransform = cameraTransform
+        context.coordinator.makeBasis = makeBasis
         context.coordinator.locksToSingleAxis = locksToSingleAxis
         for recognizer in context.coordinator.recognizers {
             recognizer.isEnabled = isEnabled
@@ -123,7 +123,7 @@ struct SplatGestureLayer: UIViewRepresentable {
         }
 
         var sceneState: SplatSceneState
-        var cameraTransform: () -> simd_float4x4
+        var makeBasis: () -> CameraRelativeBasis
         var locksToSingleAxis = false
         var recognizers: [UIGestureRecognizer] = []
         var twoFingerRecognizers: [UIGestureRecognizer] = []
@@ -141,9 +141,9 @@ struct SplatGestureLayer: UIViewRepresentable {
         private var dollyTranslationAtStart: SIMD3<Float>?
         private var dollyBasisAtStart: CameraRelativeBasis?
 
-        init(sceneState: SplatSceneState, cameraTransform: @escaping () -> simd_float4x4) {
+        init(sceneState: SplatSceneState, makeBasis: @escaping () -> CameraRelativeBasis) {
             self.sceneState = sceneState
-            self.cameraTransform = cameraTransform
+            self.makeBasis = makeBasis
         }
 
         // MARK: - Axis lock
@@ -210,14 +210,14 @@ struct SplatGestureLayer: UIViewRepresentable {
         }
 
         /// Horizontal drag slides the splat along the camera's flattened
-        /// heading; vertical drag raises and lowers it along world up. Under
+        /// heading; vertical drag raises and lowers it along gravity-true up. Under
         /// axis lock only whichever of those the drag started as applies.
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
             switch recognizer.state {
             case .began:
                 translationAtStart = sceneState.translation
                 // Snapshotted once so the axes can't rotate mid-gesture.
-                basisAtStart = CameraRelativeBasis(cameraTransform: cameraTransform())
+                basisAtStart = makeBasis()
             case .changed:
                 guard let translationAtStart, let basisAtStart else { return }
                 let translation = recognizer.translation(in: recognizer.view)
@@ -259,7 +259,7 @@ struct SplatGestureLayer: UIViewRepresentable {
             switch recognizer.state {
             case .began:
                 dollyTranslationAtStart = sceneState.translation
-                dollyBasisAtStart = CameraRelativeBasis(cameraTransform: cameraTransform())
+                dollyBasisAtStart = makeBasis()
             case .changed:
                 guard let dollyTranslationAtStart, let dollyBasisAtStart else { return }
                 let translation = recognizer.translation(in: recognizer.view)

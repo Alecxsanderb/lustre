@@ -23,10 +23,10 @@ struct ControlMenu: View {
     /// this is where the notches get their units.
     var rulerDescription: (minor: String, major: String)?
     var cullingSummary: (visibleChunks: Int, totalChunks: Int, visibleSplats: Int)?
-    /// The camera in the frame `sceneState.translation` lives in (the
-    /// anchor's), read per tap so nudges follow the direction the user is
-    /// facing, matching the drag gestures.
-    var cameraTransform: () -> simd_float4x4
+    /// A camera-relative basis in the frame `sceneState.translation` lives
+    /// in, built per tap so nudges follow the direction the user is facing,
+    /// matching the drag gestures.
+    var makeBasis: () -> CameraRelativeBasis
 
     var onRecenter: () -> Void
     var onBackgroundChange: (ViewerUIState.Background) -> Void
@@ -283,7 +283,7 @@ struct ControlMenu: View {
     private func nudgeButton(_ systemImage: String, label: String,
                              right: Float = 0, up: Float = 0, forward: Float = 0) -> some View {
         Button {
-            let basis = CameraRelativeBasis(cameraTransform: cameraTransform())
+            let basis = makeBasis()
             sceneState.translation += basis.worldDelta(right: right * Self.nudgeStep,
                                                        up: up * Self.nudgeStep,
                                                        forward: forward * Self.nudgeStep)

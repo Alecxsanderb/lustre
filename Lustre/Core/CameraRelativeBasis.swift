@@ -53,24 +53,43 @@ nonisolated struct CameraRelativeBasis: Equatable, Sendable {
         right = simd_normalize(simd_cross(forward, Self.worldUp))
     }
 
-    /// Re-expresses a camera-to-world transform in the frame of `parent`
-    /// (parent-to-world), so a basis built from it yields offsets in
-    /// `parent`'s local axes.
+    /// Builds the basis in world space from a camera-to-world transform, then
+    /// expresses its axes in the local frame of `parent` (parent-to-world).
     ///
     /// Needed whenever the offset is added to a position that lives in a
     /// child frame rather than in world space: a world-space delta added to a
     /// local position comes out rotated by the parent's rotation.
     ///
-    /// The flattening in `init(cameraTransform:)` still holds as long as the
-    /// parent's +Y is world up, i.e. the parent only rotates about Y.
-    static func cameraTransform(_ cameraTransform: simd_float4x4,
-                                inFrameOf parent: simd_float4x4) -> simd_float4x4 {
-        simd_inverse(parent) * cameraTransform
+    /// The flattening and "up" are decided in world space first, so they stay
+    /// gravity-true even when the parent is tilted — ARKit raycast hits follow
+    /// the real surface normal and can be a few degrees off level. Only then
+    /// are the three axes mapped through the inverse of the parent's linear
+    /// part. `worldDelta` is linear, so that's the same as mapping the final
+    /// delta, and `parent * worldDelta(...)` (as a direction) is exactly the
+    /// world-space offset. The axes are therefore not generally unit X/Y/Z in
+    /// local terms, and `up` is not `worldUp` unless the parent only yaws.
+    init(cameraTransform: simd_float4x4, expressedIn parent: simd_float4x4) {
+        let world = CameraRelativeBasis(cameraTransform: cameraTransform)
+        let linear = simd_float3x3(parent.columns.0.xyz,
+                                   parent.columns.1.xyz,
+                                   parent.columns.2.xyz)
+        // Full inverse rather than transpose: anchors carry no scale today,
+        // but this stays correct if a parent ever does.
+        let worldToLocal = simd_inverse(linear)
+        self.init(right: worldToLocal * world.right,
+                  up: worldToLocal * world.up,
+                  forward: worldToLocal * world.forward)
+    }
+
+    private init(right: SIMD3<Float>, up: SIMD3<Float>, forward: SIMD3<Float>) {
+        self.right = right
+        self.up = up
+        self.forward = forward
     }
 
     /// Composes an offset from camera-relative components, in meters, in the
-    /// frame the camera transform was given in: world, unless it came through
-    /// `cameraTransform(_:inFrameOf:)`.
+    /// frame the basis is expressed in: world for `init(cameraTransform:)`,
+    /// the parent's local frame for `init(cameraTransform:expressedIn:)`.
     func worldDelta(right rightAmount: Float,
                     up upAmount: Float,
                     forward forwardAmount: Float) -> SIMD3<Float> {
