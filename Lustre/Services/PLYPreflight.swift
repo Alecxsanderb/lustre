@@ -64,8 +64,13 @@ nonisolated enum PLYPreflight {
               let endRange = prefix.range(of: endToken) else { return .proceed }
 
         let headerBytes = prefix[prefix.startIndex..<endRange.lowerBound]
-        guard let header = String(data: headerBytes, encoding: .utf8),
-              let layout = parseLayout(header) else { return .proceed }
+        guard let header = String(data: headerBytes, encoding: .utf8) else { return .proceed }
+        guard let layout = parseLayout(header) else {
+            // A header this parser can't fully follow (say, a vendor property
+            // type) can still declare zero vertices, and the library hangs on
+            // that just the same.
+            return declaresNoVertices(header) ? .empty : .proceed
+        }
 
         switch layout {
         case .malformed:
@@ -108,6 +113,30 @@ nonisolated enum PLYPreflight {
     /// at all is left to the library, which reports it its own way.
     private static func declaresNoVertices(_ elements: [ElementLayout]) -> Bool {
         elements.contains { $0.name == "vertex" && $0.count == 0 }
+    }
+
+    /// Same test on raw header text, for headers `parseLayout` gave up on.
+    /// Looks only at the format and element lines, so an unrecognized
+    /// property type or keyword elsewhere doesn't hide the zero count. An
+    /// unrecognized format is still left to the library.
+    private static func declaresNoVertices(_ header: String) -> Bool {
+        var format: Substring?
+        var hasEmptyVertexElement = false
+        for line in header.split(whereSeparator: \.isNewline) {
+            let tokens = line.split(whereSeparator: \.isWhitespace)
+            switch tokens.first {
+            case "format" where tokens.count == 3:
+                format = tokens[1]
+            case "element" where tokens.count == 3:
+                if tokens[1] == "vertex", UInt64(tokens[2]) == 0 { hasEmptyVertexElement = true }
+            default:
+                continue
+            }
+        }
+        switch format {
+        case "binary_little_endian", "binary_big_endian", "ascii": return hasEmptyVertexElement
+        default: return false
+        }
     }
 
     /// Nil means "not understood": defer to the library's own parser. Token

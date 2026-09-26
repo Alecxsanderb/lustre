@@ -83,6 +83,39 @@ struct PLYPreflightTests {
         #expect(Self.verdict(header: header, bodyBytes: 7) == .empty)
     }
 
+    /// An unknown property type makes the full parse give up, which must not
+    /// hide an explicit zero count: the library hangs on these regardless.
+    @Test("Zero vertices is empty even with an unknown property type", arguments: [
+        "binary_little_endian", "binary_big_endian", "ascii",
+    ])
+    func zeroVerticesWithUnknownPropertyTypeIsEmpty(format: String) {
+        let header = Self.header(format: format, vertexCount: "0",
+                                 extraLines: ["property quaternion q"])
+        #expect(Self.verdict(header: header, bodyBytes: 0) == .empty)
+        // Unknown type on a later element, after the vertex element.
+        let later = Self.header(format: format, vertexCount: "0",
+                                extraLines: ["element extra 3", "property float128 w"])
+        #expect(Self.verdict(header: later, bodyBytes: 0) == .empty)
+    }
+
+    @Test("Unknown property types with vertices still proceed", arguments: [
+        "binary_little_endian", "ascii",
+    ])
+    func unknownPropertyTypeWithVerticesProceeds(format: String) {
+        let header = Self.header(format: format, extraLines: ["property quaternion q"])
+        #expect(Self.verdict(header: header, bodyBytes: 0) == .proceed)
+        // Zero rows of some other element isn't a zero-vertex file either.
+        let otherEmpty = Self.header(format: format,
+                                     extraLines: ["property quaternion q", "element face 0"])
+        #expect(Self.verdict(header: otherEmpty, bodyBytes: 0) == .proceed)
+    }
+
+    @Test func zeroVerticesUnderAnUnknownFormatIsLeftToTheLibrary() {
+        let header = Self.header(format: "wavelet", vertexCount: "0",
+                                 extraLines: ["property quaternion q"])
+        #expect(Self.verdict(header: header, bodyBytes: 0) == .proceed)
+    }
+
     @Test func zeroRowsOfAnotherElementIsNotEmpty() {
         let header = Self.header(extraLines: ["element face 0",
                                               "property list uchar int vertex_indices"])
