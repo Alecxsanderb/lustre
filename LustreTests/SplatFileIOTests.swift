@@ -104,7 +104,7 @@ struct SplatFileIOTests {
     @Test func largeSPZIsSkippedBeforeReading() async throws {
         let directory = try TemporaryDirectory()
         defer { directory.remove() }
-        // Sparse: sets the size without writing 50 MB. Its contents are
+        // Sparse: sets the size without writing the whole file. Its contents are
         // garbage, so reaching the reader would fail differently.
         let url = directory.url.appending(path: "huge.spz")
         FileManager.default.createFile(atPath: url.path, contents: nil)

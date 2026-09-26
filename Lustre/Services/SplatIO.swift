@@ -29,9 +29,11 @@ enum SplatFileIO {
     nonisolated static let recognizedButUnsupportedExtensions = ["sog", "sogs"]
 
     /// SPZ files above this size get no thumbnail. The SPZ reader decompresses
-    /// and unpacks the whole file before yielding its first batch, so
-    /// decimation can't bound its peak the way it does for PLY and `.splat`.
-    nonisolated static let maximumThumbnailSPZBytes: Int64 = 50 * 1024 * 1024
+    /// and unpacks every point, full SH included, before yielding its first
+    /// batch, so decimation can't bound its peak the way it does for PLY and
+    /// `.splat`. A 50 MB SPZ could peak at 0.5-1 GB that way, so the limit
+    /// is kept well below that.
+    nonisolated static let maximumThumbnailSPZBytes: Int64 = 20 * 1024 * 1024
 
     nonisolated enum LoadError: LocalizedError {
         case unreadableFile(URL)
