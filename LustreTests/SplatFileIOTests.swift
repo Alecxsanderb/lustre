@@ -120,12 +120,11 @@ struct SplatFileIOTests {
 
     // MARK: - Shared validation
 
-    /// Both paths reject the same files with the same error.
-    ///
-    /// Not covered: a PLY declaring zero vertices. MetalSplatter's PLY reader
-    /// never finishes its stream for one, so both paths report `stalled`
-    /// after the watchdog's 20 s rather than `empty` (pre-existing).
-    @Test(arguments: ["scan.sog", "notes.txt", "cut.ply", "empty.splat"])
+    /// Both paths reject the same files with the same error. The zero-vertex
+    /// PLYs used to hang in MetalSplatter's reader until the watchdog's 20 s
+    /// stall; the preflight now reports them as empty up front.
+    @Test(.timeLimit(.minutes(1)),
+          arguments: ["scan.sog", "notes.txt", "cut.ply", "empty.splat", "zero.ply", "zero-ascii.ply"])
     func bothPathsRejectAlike(name: String) async throws {
         let directory = try TemporaryDirectory()
         defer { directory.remove() }
@@ -133,12 +132,18 @@ struct SplatFileIOTests {
         switch name {
         case "cut.ply": data = Self.plyData(count: 10).dropLast(7)
         case "empty.splat": data = Data()
+        case "zero.ply": data = Self.plyData(count: 0)
+        case "zero-ascii.ply":
+            data = Data("ply\nformat ascii 1.0\nelement vertex 0\nproperty float x\nproperty float y\nproperty float z\nend_header\n".utf8)
         default: data = Data([1, 2, 3])
         }
         let url = try write(data, named: name, in: directory)
 
+        let start = ContinuousClock.now
         let viewer = await loadError { _ = try await SplatFileIO.loadPoints(from: url) }
         let thumbnail = await loadError { _ = try await SplatFileIO.loadThumbnailPoints(from: url) }
+        // Rejected up front, not by the watchdog after a stall.
+        #expect(ContinuousClock.now - start < .seconds(5))
 
         let expected: String
         switch name {

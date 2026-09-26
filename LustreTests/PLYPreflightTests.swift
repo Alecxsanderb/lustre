@@ -73,6 +73,22 @@ struct PLYPreflightTests {
         #expect(Self.verdict(header: header, bodyBytes: 121) == .trailingData)
     }
 
+    @Test("Zero vertices is empty, binary or ASCII", arguments: [
+        "binary_little_endian", "binary_big_endian", "ascii",
+    ])
+    func zeroVerticesIsEmpty(format: String) {
+        let header = Self.header(format: format, vertexCount: "0")
+        #expect(Self.verdict(header: header, bodyBytes: 0) == .empty)
+        // Stray bytes don't change the answer: there's still nothing to draw.
+        #expect(Self.verdict(header: header, bodyBytes: 7) == .empty)
+    }
+
+    @Test func zeroRowsOfAnotherElementIsNotEmpty() {
+        let header = Self.header(extraLines: ["element face 0",
+                                              "property list uchar int vertex_indices"])
+        #expect(Self.verdict(header: header, bodyBytes: 120) == .proceed)
+    }
+
     @Test func asciiBodiesAreLeftToTheLibrary() {
         let header = Self.header(format: "ascii")
         #expect(Self.verdict(header: header, bodyBytes: 0) == .proceed)

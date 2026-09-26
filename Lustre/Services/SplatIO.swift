@@ -161,7 +161,8 @@ enum SplatFileIO {
         }
 
         // MetalSplatter hangs, rather than throwing, on a binary PLY whose
-        // body doesn't match its header. See PLYPreflight.swift.
+        // body doesn't match its header, and on any PLY declaring zero
+        // vertices. See PLYPreflight.swift.
         if fileExtension == "ply" {
             let verdict: PLYPreflight.Verdict
             do {
@@ -173,6 +174,7 @@ enum SplatFileIO {
             case .proceed: break
             case .truncated: throw LoadError.truncated(url)
             case .trailingData, .malformedHeader: throw LoadError.malformed(url)
+            case .empty: throw LoadError.empty(url)
             }
         }
 

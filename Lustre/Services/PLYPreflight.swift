@@ -33,6 +33,10 @@ nonisolated enum PLYPreflight {
         case trailingData
         /// Header declares something the library would crash on.
         case malformedHeader
+        /// Header declares zero vertices. The library's reader never finishes
+        /// its stream for one (binary or ASCII), so without this the file
+        /// would sit on "Loading…" until the watchdog gives up.
+        case empty
     }
 
     /// Matches PLYIO's `PLYReader.Constants.headerMaxLen`. The library rejects
@@ -66,9 +70,10 @@ nonisolated enum PLYPreflight {
         switch layout {
         case .malformed:
             return .malformedHeader
-        case .notBinary:
-            return .proceed
+        case .ascii(let elements):
+            return declaresNoVertices(elements) ? .empty : .proceed
         case .binary(let elements):
+            if declaresNoVertices(elements) { return .empty }
             let headerLength = UInt64(endRange.upperBound - prefix.startIndex)
             guard let body = minimumBodySize(elements) else {
                 // Doesn't fit in 64 bits, so no real file is that long.
@@ -86,6 +91,7 @@ nonisolated enum PLYPreflight {
     // MARK: - Header parsing
 
     private struct ElementLayout {
+        var name: Substring
         var count: UInt64
         /// Bytes per row, counting each list as its count field only.
         var minimumRowSize: UInt64 = 0
@@ -94,8 +100,14 @@ nonisolated enum PLYPreflight {
 
     private enum Layout {
         case binary([ElementLayout])
-        case notBinary
+        case ascii([ElementLayout])
         case malformed
+    }
+
+    /// Only an explicit `element vertex 0`. A header with no vertex element
+    /// at all is left to the library, which reports it its own way.
+    private static func declaresNoVertices(_ elements: [ElementLayout]) -> Bool {
+        elements.contains { $0.name == "vertex" && $0.count == 0 }
     }
 
     /// Nil means "not understood": defer to the library's own parser. Token
@@ -118,7 +130,7 @@ nonisolated enum PLYPreflight {
                 // PLYIO force-unwraps `UInt32(count)`, so a larger count is a
                 // crash, not a parse error.
                 guard count <= UInt64(UInt32.max) else { return .malformed }
-                elements.append(ElementLayout(count: count))
+                elements.append(ElementLayout(name: tokens[1], count: count))
             case "property":
                 guard !elements.isEmpty else { return nil }
                 let width: UInt64
@@ -142,7 +154,7 @@ nonisolated enum PLYPreflight {
 
         switch format {
         case "binary_little_endian", "binary_big_endian": return .binary(elements)
-        case "ascii": return .notBinary
+        case "ascii": return .ascii(elements)
         default: return nil
         }
     }
