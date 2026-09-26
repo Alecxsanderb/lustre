@@ -16,6 +16,14 @@ ROADMAP Build order **steps 2 (Library + Home) and 3 (Settings) are merged to
 mode), after the on-device pass below.
 
 ## Recently done
+- **2026-09-26, placement + depth-drag fixes (from the 1.0 (5) device test).**
+  `775386c`: the placement overlay was drawn once and never updated on device
+  (it read an unobserved ARKit poll), so Place / Place anyway stayed disabled;
+  it now follows an observed readiness state. `7b68b7b`: drags and nudge
+  arrows applied world-space deltas to an anchor-local translation, so an
+  ARKit raycast anchor's yaw rotated them; the axes are now built in anchor
+  space. Unit-tested and simulator-checked (overlay updates on its own).
+  **Not verified on device yet.**
 - **2026-09-25, step 3 Settings + test target.** `LustreTests` (hosted, Swift
   Testing, shared `Lustre` scheme; 150 tests pass) covers PLYPreflight,
   SplatFileNaming, AppPreferences, SplatScale/Bounds, RulerScale, Frustum,
@@ -84,6 +92,12 @@ mode), after the on-device pass below.
   SPZ, or .splat."
 
 ## Suspected issues
+- **Recenter probably misaligns the splat on device.** `ARKitPoseProvider.recenter()`
+  folds an offset into `pose`, but raycast hits, the fallback candidate, and
+  `ARAnchor` transforms stay in raw ARKit world space, so after a recenter the
+  renderer's `pose.viewMatrix * anchor` mixes frames and the placement preview
+  would sit away from the crosshair. Found reading code 2026-09-26. Confirm:
+  recenter on device, then re-place.
 - **Passthrough camera plumbing and real-plane occlusion may be unexercised.**
   The AR pose path has run on device; these two are off by default, so the
   TestFlight run may not have touched them. Confirm: enable each on device.
@@ -105,7 +119,25 @@ mode), after the on-device pass below.
 2. Confirm SPZ and `.splat` loading (may already be covered by the device run).
 3. On device: try each Initial size preset with tap-to-place, and confirm
    the Simulator section is absent from the TestFlight build.
-4. Then ROADMAP Build order step 4 (Capture: locked camera mode).
+4. **Viewer display defaults** (user request from the 1.0 (5) device test:
+   switching splats resets toggles). Planned 2026-09-26: one stored value per
+   setting; Viewer menu changes write back ("last used wins") and a Settings
+   "Viewer Display" section edits the same values. Persisted: touch controls,
+   axis lock, indicators, ticks, units (locale default), background,
+   occlusion; last-used only: expanded section, advanced rotation. Detail
+   (quality) is a Settings default only; in-Viewer changes last for that
+   splat. Save user intent, not availability. Also fixes `onAppear` never
+   calling `setIndicatorsEnabled` (latent: indicators defaulting on wouldn't
+   draw).
+5. **Library thumbnails.** Planned 2026-09-26: offscreen MetalSplatter render
+   of a stride-decimated (~300k, SH0-only) subsample in `Services/Thumbnails/`,
+   one at a time, paused while the Viewer is open; JPEG cache in
+   `Caches/Thumbnails/` keyed by name+size+mtime+renderer version; generated
+   on first display; `.failed` markers for damaged files. Decisions: skip SPZ
+   files over ~50 MB (whole-file decompression peak); exterior 3/4 framing
+   accepted for v1 even though interior captures will look like a shell.
+   Estimated 600-800 lines, 3-4 sessions.
+6. Then ROADMAP Build order step 4 (Capture: locked camera mode).
 
 ## Open questions
 - Is the App Store name "Lustre" reserved? (Every build upload resets the
