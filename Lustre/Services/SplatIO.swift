@@ -18,7 +18,7 @@ enum SplatFileIO {
     /// Formats MetalSplatter can actually decode. These are exactly the
     /// extensions `SplatIO.SplatFileFormat` dispatches on, lowercased — keep
     /// the two in sync or the picker will offer files the reader rejects.
-    static let readableExtensions = ["ply", "spz", "splat"]
+    nonisolated static let readableExtensions = ["ply", "spz", "splat"]
 
     /// Compressed containers we recognize but cannot decode yet.
     ///
@@ -26,9 +26,14 @@ enum SplatFileIO {
     /// `main`, 2026-07-19). They're listed so the picker still offers them and
     /// the user gets a specific message naming the format, rather than a parse
     /// failure from a reader that was never going to work.
-    static let recognizedButUnsupportedExtensions = ["sog", "sogs"]
+    nonisolated static let recognizedButUnsupportedExtensions = ["sog", "sogs"]
 
-    enum LoadError: LocalizedError {
+    /// SPZ files above this size get no thumbnail. The SPZ reader decompresses
+    /// and unpacks the whole file before yielding its first batch, so
+    /// decimation can't bound its peak the way it does for PLY and `.splat`.
+    nonisolated static let maximumThumbnailSPZBytes: Int64 = 50 * 1024 * 1024
+
+    nonisolated enum LoadError: LocalizedError {
         case unreadableFile(URL)
         case unsupportedFormat(URL)
         case notYetSupported(URL)
@@ -36,6 +41,8 @@ enum SplatFileIO {
         case truncated(URL)
         case malformed(URL)
         case stalled(URL)
+        /// Readable, but too expensive to thumbnail. Not a damaged file.
+        case tooLargeForThumbnail(URL)
 
         var errorDescription: String? {
             switch self {
@@ -54,6 +61,8 @@ enum SplatFileIO {
                 return "\(url.lastPathComponent) isn't a valid PLY file."
             case .stalled(let url):
                 return "Lustre couldn't finish reading \(url.lastPathComponent). The file may be damaged."
+            case .tooLargeForThumbnail(let url):
+                return "\(url.lastPathComponent) is too large to preview."
             }
         }
     }
@@ -84,6 +93,57 @@ enum SplatFileIO {
             if needsScopedAccess { url.stopAccessingSecurityScopedResource() }
         }
 
+        let reader = try validatedReader(for: url)
+        let points: [SplatPoint]
+        do {
+            points = try await SplatStreamWatchdog.readAll(reader)
+        } catch is SplatStreamWatchdog.Stalled {
+            throw LoadError.stalled(url)
+        }
+        guard !points.isEmpty else { throw LoadError.empty(url) }
+        return points
+    }
+
+    /// Reads an evenly spread subsample of at most `cap` points, with
+    /// spherical harmonics stripped to degree 0, for rendering a thumbnail.
+    ///
+    /// Streams through `SplatDecimator`, so a PLY or `.splat` never holds more
+    /// than the cap plus one batch. `@concurrent` so the preflight and read
+    /// stay off the caller's actor even when that's the main actor. Throws
+    /// `tooLargeForThumbnail` for an SPZ over `maximumThumbnailSPZBytes`.
+    @concurrent
+    nonisolated static func loadThumbnailPoints(from url: URL,
+                                                cap: Int = SplatDecimator.defaultCap) async throws -> [SplatPoint] {
+        let needsScopedAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if needsScopedAccess { url.stopAccessingSecurityScopedResource() }
+        }
+
+        let reader = try validatedReader(for: url)
+        if url.pathExtension.lowercased() == "spz" {
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).flatMap { $0 }
+            if let size, Int64(size) > maximumThumbnailSPZBytes {
+                throw LoadError.tooLargeForThumbnail(url)
+            }
+        }
+
+        let decimator: StrideDecimator<SplatPoint>
+        do {
+            decimator = try await SplatStreamWatchdog.drain(reader, into: SplatDecimator.make(cap: cap)) {
+                decimator, batch in
+                decimator.add(batch)
+            }
+        } catch is SplatStreamWatchdog.Stalled {
+            throw LoadError.stalled(url)
+        }
+        guard !decimator.kept.isEmpty else { throw LoadError.empty(url) }
+        return decimator.kept
+    }
+
+    /// Every check that runs before MetalSplatter sees a file, shared by the
+    /// Viewer and thumbnail paths so they accept and reject exactly the same
+    /// files with the same messages. The caller holds security-scoped access.
+    nonisolated static func validatedReader(for url: URL) throws -> SplatSceneReader {
         guard FileManager.default.isReadableFile(atPath: url.path) else {
             throw LoadError.unreadableFile(url)
         }
@@ -114,20 +174,10 @@ enum SplatFileIO {
             }
         }
 
-        let reader: SplatSceneReader
         do {
-            reader = try AutodetectSceneReader(url)
+            return try AutodetectSceneReader(url)
         } catch {
             throw LoadError.unsupportedFormat(url)
         }
-
-        let points: [SplatPoint]
-        do {
-            points = try await SplatStreamWatchdog.readAll(reader)
-        } catch is SplatStreamWatchdog.Stalled {
-            throw LoadError.stalled(url)
-        }
-        guard !points.isEmpty else { throw LoadError.empty(url) }
-        return points
     }
 }
