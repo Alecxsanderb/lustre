@@ -19,8 +19,8 @@ and their code-review follow-ups are fixed (simulator-verified only).
 **Step 4, Capture: locked camera mode** is next. The plan is
 `docs/capture-plan.md`, with all five decisions settled (user accepted the
 recommendations 2026-10-08). Commit 0, the throwaway on-device spike of
-ARKit-backed recording, is **built on `spike/arkit-capture`
-(`1d52d50`..`6643881`) and shipped in 1.0 (8), not yet run on device**.
+ARKit-backed recording, is **built (`1d52d50`..`6643881`, merged to `main`
+2026-10-09) and shipped in 1.0 (8), not yet run on device**.
 Settings › Spike (temporary) › Capture spike; code in `Lustre/Capture/Spike/`
 (delete when done). Writes video, `<run>.json`, and `spike-report.txt` to
 Documents/CaptureSpike. 221 tests pass (24 new, pure logic only); simulator
@@ -187,9 +187,8 @@ wobble). Color range tagging of the HEVC output needs a visual check.
    clean; button disabled until tracking), Recenter height vs a surface
    placement (center at eye height may sit low), Place anyway parallax at
    1.0 m.
-3. Merge the spike branch into `main` per the user (spike folder stays
-   isolated so it can be deleted after step 4 lands), then Capture commits
-   1-10 per the plan.
+3. Capture commits 1-10 per the plan. Delete `Lustre/Capture/Spike/` and
+   the Settings spike row once step 4 lands (merged to `main` 2026-10-09).
 4. Still unchecked on device from earlier: Share sheet, SPZ/`.splat`,
    passthrough + plane occlusion explicitly, background/resume with a placed
    splat, thumbnail-generation overlap with opening the Viewer (memory).
