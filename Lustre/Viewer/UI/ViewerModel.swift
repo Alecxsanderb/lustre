@@ -432,9 +432,20 @@ final class ViewerModel {
     /// heading, carrying over only the current anchor's heading.
     ///
     /// The heading is flattened to horizontal so looking at the floor or the
-    /// ceiling doesn't bury the splat in either. When the camera looks
-    /// straight up or down there's no horizontal forward, so screen-up stands
-    /// in for it (it points where the user faces).
+    /// ceiling doesn't bury the splat in either. Near vertical, the flattened
+    /// forward shrinks to nothing and its direction becomes noise (at 89° a
+    /// 1° sideways wobble swings it ~60°), so screen-up, which points where
+    /// the user faces whether they look down or up, is blended in:
+    ///
+    ///     heading = flat(forward) - flat(up) * forward.y * w
+    ///
+    /// `w` is a smoothstep of |forward.y| from `sin 60°` (0) to 1 (fully on).
+    /// Below 60° of pitch, the range people hold a phone in, the result is
+    /// exactly the flattened forward, unaffected by roll; above it the two
+    /// agree for an unrolled phone, so the direction stays put while the
+    /// noisy term fades out. Continuous everywhere, no switch to flip across.
+    /// It only degenerates for a phone held upside down past vertical, where
+    /// it falls back to the camera's own position.
     ///
     /// The anchor's yaw is kept because raycast-hit anchors carry an arbitrary
     /// one; a translation-only anchor would visibly spin the splat even though
@@ -444,11 +455,12 @@ final class ViewerModel {
                                                     currentAnchor: simd_float4x4) -> simd_float4x4 {
         let origin = cameraTransform.columns.3.xyz
         let forward = -cameraTransform.columns.2.xyz
-        var heading = SIMD3<Float>(forward.x, 0, forward.z)
-        if simd_length(heading) < 1e-3 {
-            let up = cameraTransform.columns.1.xyz * (forward.y < 0 ? 1 : -1)
-            heading = SIMD3<Float>(up.x, 0, up.z)
-        }
+        let up = cameraTransform.columns.1.xyz
+        let blendStart: Float = 0.866_025_4 // sin 60°
+        let x = simd_clamp((abs(forward.y) - blendStart) / (1 - blendStart), 0, 1)
+        let upWeight = x * x * (3 - 2 * x)
+        let blended = forward - up * (forward.y * upWeight)
+        let heading = SIMD3<Float>(blended.x, 0, blended.z)
         guard simd_length(heading) >= 1e-3 else {
             return matrix4x4_translation(origin)
         }

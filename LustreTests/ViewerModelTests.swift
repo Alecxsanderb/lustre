@@ -407,6 +407,69 @@ struct ViewerModelTests {
         let expected = SIMD3<Float>(0, 1.5, -PlacementFallback.distance)
         #expect(simd_distance(target.columns.3.xyz, expected) < 1e-4)
     }
+
+    // MARK: Recenter heading near vertical
+
+    /// Facing -X (yaw 90°) so a sign or axis slip can't pass by landing on -Z.
+    private static func headingCamera(pitchDegrees: Float,
+                                      rollDegrees: Float = 0,
+                                      localYawDegrees: Float = 0) -> simd_float4x4 {
+        let radians = Float.pi / 180
+        return matrix4x4_translation(0, 1.5, 0)
+            * matrix4x4_rotation(radians: .pi / 2, axis: SIMD3<Float>(0, 1, 0))
+            * matrix4x4_rotation(radians: pitchDegrees * radians, axis: SIMD3<Float>(1, 0, 0))
+            * matrix4x4_rotation(radians: localYawDegrees * radians, axis: SIMD3<Float>(0, 1, 0))
+            * matrix4x4_rotation(radians: rollDegrees * radians, axis: SIMD3<Float>(0, 0, 1))
+    }
+
+    /// Unit horizontal direction from the camera to the recenter target.
+    private static func recenterDirection(_ camera: simd_float4x4) -> SIMD3<Float> {
+        let target = ViewerModel.recenterAnchorTransform(cameraTransform: camera,
+                                                         currentAnchor: matrix_identity_float4x4)
+        let offset = target.columns.3.xyz - camera.columns.3.xyz
+        #expect(abs(offset.y) < 1e-5)
+        #expect(abs(simd_length(offset) - PlacementFallback.distance) < 1e-4)
+        return simd_normalize(offset)
+    }
+
+    private static let facing = SIMD3<Float>(-1, 0, 0)
+
+    @Test("Nearly vertical still lands where the user faces", arguments: [Float(-89), 89])
+    func recenterNearVerticalLandsInFront(pitchDegrees: Float) {
+        let direction = Self.recenterDirection(Self.headingCamera(pitchDegrees: pitchDegrees))
+        #expect(simd_distance(direction, Self.facing) < 1e-4)
+    }
+
+    /// No jump anywhere in the pitch range: an unrolled phone always gets its
+    /// facing direction, which the old hard switch at ~0.06° only did by luck.
+    @Test func recenterHeadingIsSteadyAcrossPitch() {
+        for step in -179...179 {
+            let direction = Self.recenterDirection(Self.headingCamera(pitchDegrees: Float(step) / 2))
+            #expect(simd_distance(direction, Self.facing) < 1e-4, "pitch \(Float(step) / 2)°")
+        }
+    }
+
+    /// The flip bug: at 89.5° a 1° sideways wobble of the view direction used
+    /// to swing the flattened forward ~60°. Screen-up barely moves, so now
+    /// the heading barely moves.
+    @Test("A small wobble near vertical doesn't swing the heading", arguments: [Float(-89.5), 89.5])
+    func recenterNearVerticalIgnoresWobble(pitchDegrees: Float) {
+        for wobble: Float in [-1, 1] {
+            let camera = Self.headingCamera(pitchDegrees: pitchDegrees, localYawDegrees: wobble)
+            let direction = Self.recenterDirection(camera)
+            let degreesOff = acos(min(1, simd_dot(direction, Self.facing))) * 180 / .pi
+            #expect(degreesOff < 2, "wobble \(wobble)°: \(degreesOff)° off")
+        }
+    }
+
+    /// Below 60° the blend is fully off, so a rolled phone gets the exact
+    /// flattened forward, as before.
+    @Test func recenterAtOrdinaryPitchIgnoresRoll() {
+        let camera = Self.headingCamera(pitchDegrees: -45, rollDegrees: 25)
+        let forward = -camera.columns.2.xyz
+        let expected = simd_normalize(SIMD3<Float>(forward.x, 0, forward.z))
+        #expect(simd_distance(Self.recenterDirection(camera), expected) < 1e-5)
+    }
 }
 
 /// A pose provider with no surfaces and no camera: the shape of a device
