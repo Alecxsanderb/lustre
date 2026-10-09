@@ -188,6 +188,11 @@ final class ViewerModel {
 
     var statusMessage: String? { poseProvider.statusMessage }
 
+    /// Recenter commits a world position from the current pose, so it waits
+    /// for one worth trusting. Observed by the menu; the provider assigns it
+    /// only on tracking-state changes, so this doesn't re-render per frame.
+    var canRecenter: Bool { poseProvider.hasTrackedPose }
+
     /// A camera-relative basis for gestures and nudges, expressed in the
     /// frame `sceneState.translation` lives in.
     ///
@@ -403,7 +408,13 @@ final class ViewerModel {
     /// camera resets and the splat lands in front of where it reset to; ARKit
     /// ignores it. While awaiting placement the preview already follows the
     /// crosshair, so only the provider call happens.
+    ///
+    /// A no-op without a tracked pose: before ARKit first reaches `.normal`
+    /// the pose is the identity placeholder, and during limited tracking it
+    /// is stale, so the splat would land somewhere the user isn't. The menu
+    /// disables the button then too; this guard covers any other caller.
     func recenter() {
+        guard poseProvider.hasTrackedPose else { return }
         poseProvider.recenter()
         guard let surfaceProvider, sceneState.placementState == .placed else { return }
 

@@ -28,6 +28,8 @@ struct ControlMenu: View {
     /// matching the drag gestures.
     var makeBasis: () -> CameraRelativeBasis
 
+    /// False until the pose provider has a trustworthy pose.
+    var canRecenter: Bool
     var onRecenter: () -> Void
     var onBackgroundChange: (ViewerUIState.Background) -> Void
     var onReplace: () -> Void
@@ -350,6 +352,7 @@ struct ControlMenu: View {
 
             HStack(spacing: 8) {
                 Button { onRecenter() } label: { Label("Recenter", systemImage: "scope") }
+                    .disabled(!canRecenter)
                 Button { sceneState.resetPlacement() } label: {
                     Label("Reset", systemImage: "arrow.counterclockwise")
                 }

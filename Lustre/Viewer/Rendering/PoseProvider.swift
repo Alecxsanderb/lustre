@@ -42,6 +42,15 @@ protocol PoseProvider: AnyObject {
     /// A short message for the overlay when tracking isn't nominal, else nil.
     var statusMessage: String? { get }
 
+    /// True when `pose` is current and trustworthy, not a placeholder or a
+    /// pose held over from before tracking degraded. Anything that commits a
+    /// world position from the pose (Recenter) must check it first.
+    ///
+    /// The UI observes it to enable controls, so implementations must assign
+    /// it only when it actually changes, not every frame. Deliberately no
+    /// default: a provider that can lose tracking has to say so.
+    var hasTrackedPose: Bool { get }
+
     /// Begin producing poses.
     func start()
 

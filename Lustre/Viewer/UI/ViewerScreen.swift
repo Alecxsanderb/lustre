@@ -66,6 +66,7 @@ struct ViewerScreen: View {
                                 rulerDescription: model.rulerDescription,
                                 cullingSummary: model.cullingSummary,
                                 makeBasis: model.makeGestureBasis,
+                                canRecenter: model.canRecenter,
                                 onRecenter: model.recenter,
                                 onBackgroundChange: model.setBackground,
                                 onReplace: model.beginPlacement,

@@ -316,6 +316,69 @@ struct ViewerModelTests {
         #expect(simd_distance(anchor.columns.3.xyz, expected) < 1e-4)
     }
 
+    /// The second Recenter must remove the anchor the first one made, not
+    /// only the original. On device that anchor may not have reached a frame
+    /// yet, which is what used to orphan it.
+    @Test func doubleRecenterRemovesTheFirstRecenterAnchor() throws {
+        let (model, provider) = Self.placedModel()
+        let original = try #require(model.sceneState.anchorID)
+
+        model.recenter()
+        let first = try #require(model.sceneState.anchorID)
+        model.recenter()
+        let second = try #require(model.sceneState.anchorID)
+
+        #expect(provider.removedAnchorIDs == [original, first])
+        #expect(Set(provider.anchors.keys) == [second])
+    }
+
+    /// No anchor (e.g. the session isn't running) still moves the splat:
+    /// the unanchored placed transform is what renders.
+    @Test func recenterWhenMakeAnchorFailsFallsBackToThePlacedTransform() throws {
+        let (model, provider) = Self.placedModel()
+        let original = try #require(model.sceneState.anchorID)
+        provider.makesAnchors = false
+
+        model.recenter()
+
+        #expect(model.sceneState.anchorID == nil)
+        #expect(provider.removedAnchorIDs == [original])
+        #expect(provider.anchors.isEmpty)
+        let expected = SIMD3<Float>(1 - PlacementFallback.distance, 1.4, 2)
+        #expect(simd_distance(model.sceneState.placedTransform.columns.3.xyz, expected) < 1e-4)
+        #expect(model.currentAnchorTransform == model.sceneState.placedTransform)
+        #expect(model.sceneState.translation == .zero)
+    }
+
+    /// Before tracking gets going the pose is a placeholder; anchoring there
+    /// would put the splat at the world origin, not in front of the user.
+    @Test func recenterWithoutATrackedPoseIsANoOp() {
+        let (model, provider) = Self.placedModel()
+        provider.hasTrackedPose = false
+        #expect(!model.canRecenter)
+        let anchorID = model.sceneState.anchorID
+        let anchors = provider.anchors
+        let placed = model.sceneState.placedTransform
+        let translation = model.sceneState.translation
+
+        model.recenter()
+
+        #expect(model.sceneState.anchorID == anchorID)
+        #expect(provider.anchors == anchors)
+        #expect(provider.removedAnchorIDs.isEmpty)
+        #expect(model.sceneState.placedTransform == placed)
+        #expect(model.sceneState.translation == translation)
+        #expect(provider.recenterCount == 0)
+
+        provider.hasTrackedPose = true
+        #expect(model.canRecenter)
+    }
+
+    @Test func simulatedProviderAlwaysAllowsRecenter() {
+        let model = ViewerModel(makeProvider: { _ in SimulatedPoseProvider() })
+        #expect(model.canRecenter)
+    }
+
     @Test func recenterWithoutSurfacesOnlyRecentersTheProvider() {
         let provider = StubPoseProvider()
         let model = ViewerModel(makeProvider: { _ in provider })
@@ -352,6 +415,7 @@ struct ViewerModelTests {
 private final class StubPoseProvider: PoseProvider {
     var pose = CameraPose.identity
     var verticalFieldOfView: Float = 1
+    var hasTrackedPose = true
     private(set) var recenterCount = 0
     func start() {}
     func stop() {}
@@ -365,6 +429,7 @@ private final class StubPoseProvider: PoseProvider {
 private final class StubSurfacePoseProvider: PoseProvider, SurfaceProvider {
     var pose = CameraPose.identity
     var verticalFieldOfView: Float = 1
+    var hasTrackedPose = true
     private(set) var recenterCount = 0
     func start() {}
     func stop() {}
@@ -380,7 +445,11 @@ private final class StubSurfacePoseProvider: PoseProvider, SurfaceProvider {
     var placementCandidate: PlacementCandidate? { isPlacementActive ? candidate : nil }
     var placementReadiness: PlacementReadiness { PlacementReadiness(candidate: placementCandidate) }
 
+    /// False models ARKit's `makeAnchor` while the session isn't running.
+    var makesAnchors = true
+
     func makeAnchor(at transform: simd_float4x4) -> UUID? {
+        guard makesAnchors else { return nil }
         let id = UUID()
         anchors[id] = transform
         return id
@@ -388,5 +457,11 @@ private final class StubSurfacePoseProvider: PoseProvider, SurfaceProvider {
 
     func anchorTransform(for id: UUID) -> simd_float4x4? { anchors[id] }
 
-    func removeAnchor(_ id: UUID) { anchors.removeValue(forKey: id) }
+    /// Every id passed to `removeAnchor`, in order, whether or not it existed.
+    private(set) var removedAnchorIDs: [UUID] = []
+
+    func removeAnchor(_ id: UUID) {
+        removedAnchorIDs.append(id)
+        anchors.removeValue(forKey: id)
+    }
 }

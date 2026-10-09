@@ -45,6 +45,11 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
     private(set) var pose: CameraPose = .identity
     private(set) var statusMessage: String?
 
+    /// Whether tracking is `.normal` right now, so `pose` is live rather than
+    /// the identity placeholder or the last good pose held through limited
+    /// tracking. Assigned only on change; the menu observes it.
+    private(set) var hasTrackedPose = false
+
     /// Overwritten from ARKit's real intrinsics on the first frame; this is
     /// only the fallback used before tracking starts.
     private(set) var verticalFieldOfView: Float = 60 * .pi / 180
@@ -95,6 +100,7 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
         isRunning = false
         // `update` stops polling while paused, so the cache would go stale.
         setPlacementCandidate(nil)
+        setHasTrackedPose(false)
     }
 
     /// Polls the session rather than using ARSessionDelegate: the render loop
@@ -112,11 +118,20 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
         refreshPlacementCandidate(from: frame)
 
         // A pose from a non-tracking camera is garbage; hold the last good one.
-        guard case .normal = camera.trackingState else { return }
+        guard case .normal = camera.trackingState else {
+            setHasTrackedPose(false)
+            return
+        }
 
         let viewMatrix = camera.viewMatrix(for: interfaceOrientation)
         pose = CameraPose(transform: simd_inverse(viewMatrix))
         verticalFieldOfView = verticalFOV(from: camera)
+        setHasTrackedPose(true)
+    }
+
+    /// Observation notifies on every set, and this is called every frame.
+    private func setHasTrackedPose(_ value: Bool) {
+        if value != hasTrackedPose { hasTrackedPose = value }
     }
 
     /// Deliberately does nothing. The camera here is the physical phone, so

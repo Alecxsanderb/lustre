@@ -36,6 +36,9 @@ final class SimulatedPoseProvider: PoseProvider {
 
     private(set) var pose: CameraPose = .identity
 
+    /// The joystick camera is always exactly where it says it is.
+    var hasTrackedPose: Bool { true }
+
     /// Backing storage for `SurfaceProvider`. Stored here rather than in the
     /// extension because Swift extensions can't add stored properties.
     var detectsSurfaces = false
