@@ -49,10 +49,6 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
     /// only the fallback used before tracking starts.
     private(set) var verticalFieldOfView: Float = 60 * .pi / 180
 
-    /// Applied so that "recenter" makes the current position the origin
-    /// without restarting the session and losing tracking.
-    private var originOffset: simd_float4x4 = matrix_identity_float4x4
-
     private var latestCamera: ARCamera?
     private var isRunning = false
     private var hasRunSession = false
@@ -115,16 +111,18 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
         guard case .normal = camera.trackingState else { return }
 
         let viewMatrix = camera.viewMatrix(for: interfaceOrientation)
-        pose = CameraPose(transform: originOffset * simd_inverse(viewMatrix))
+        pose = CameraPose(transform: simd_inverse(viewMatrix))
         verticalFieldOfView = verticalFOV(from: camera)
     }
 
-    func recenter() {
-        guard let camera = latestCamera else { return }
-        // Cancel out wherever the camera currently is, so it becomes the origin.
-        let current = simd_inverse(camera.viewMatrix(for: interfaceOrientation))
-        originOffset = simd_inverse(current)
-    }
+    /// Deliberately does nothing. The camera here is the physical phone, so
+    /// there is no virtual camera to reset, and `pose` must stay in raw ARKit
+    /// world space: raycast hits, anchors, and planes are all reported there,
+    /// and the renderer composes `pose.viewMatrix * anchor * model`. An offset
+    /// folded into `pose` alone (what this used to do) put the splat away from
+    /// the crosshair after a recenter. `ViewerModel.recenter()` moves the
+    /// splat instead.
+    func recenter() {}
 
     /// ARKit's own projection, built from the physical camera's intrinsics.
     /// Using it (rather than a guessed FOV) is what makes splats sit still
@@ -257,9 +255,6 @@ extension ARKitPoseProvider: CameraFrameSource {
 
 extension ARKitPoseProvider: SurfaceProvider {
 
-    /// Where the candidate goes when no plane is under the crosshair.
-    private static let fallbackDistance: Float = 1.5
-
     var isSurfaceDetectionEnabled: Bool {
         get { detectsSurfaces }
         set {
@@ -329,7 +324,7 @@ extension ARKitPoseProvider: SurfaceProvider {
         let origin = cameraTransform.columns.3.xyz
         let forward = -cameraTransform.columns.2.xyz
         return PlacementCandidate(
-            transform: matrix4x4_translation(origin + forward * Self.fallbackDistance),
+            transform: matrix4x4_translation(origin + forward * PlacementFallback.distance),
             isOnSurface: false)
     }
 

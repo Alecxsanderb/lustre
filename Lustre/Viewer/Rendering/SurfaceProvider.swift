@@ -50,6 +50,14 @@ struct PlacementCandidate: Equatable {
     var isOnSurface: Bool
 }
 
+/// Shared by every provider's no-surface candidate and by Recenter, which
+/// both float the splat a fixed distance ahead of the camera. One constant so
+/// "Place anyway" and Recenter put the splat at the same distance.
+nonisolated enum PlacementFallback {
+    /// Meters ahead of the camera.
+    static let distance: Float = 1.5
+}
+
 /// What the placement UI needs to know, coarsened so it changes only a few
 /// times per placement rather than every frame.
 ///

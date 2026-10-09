@@ -216,6 +216,134 @@ struct ViewerModelTests {
         #expect(model.uiState.occludesBehindSurfaces)
     }
     #endif
+
+    // MARK: - Recenter
+
+    /// At (1, 1.4, 2), facing -X and pitched 30° down at the floor.
+    private static let recenterCamera = matrix4x4_translation(1, 1.4, 2)
+        * matrix4x4_rotation(radians: .pi / 2, axis: SIMD3<Float>(0, 1, 0))
+        * matrix4x4_rotation(radians: -.pi / 6, axis: SIMD3<Float>(1, 0, 0))
+
+    /// Placed on a raycast-style anchor carrying its own yaw, then nudged,
+    /// scaled, and rotated by the user.
+    private static func placedModel() -> (ViewerModel, StubSurfacePoseProvider) {
+        let provider = StubSurfacePoseProvider()
+        provider.candidate = PlacementCandidate(
+            transform: matrix4x4_translation(0, 0, -2)
+                * matrix4x4_rotation(radians: 0.7, axis: SIMD3<Float>(0, 1, 0)),
+            isOnSurface: true)
+        let model = ViewerModel(makeProvider: { _ in provider })
+        model.beginPlacement()
+        model.confirmPlacement()
+        model.sceneState.translation = SIMD3(0.3, 0.1, -0.2)
+        model.sceneState.scale = 0.4
+        model.sceneState.yaw = 1.1
+        provider.pose = CameraPose(transform: recenterCamera)
+        return (model, provider)
+    }
+
+    @Test func recenterReanchorsAPlacedSplatInFrontOfTheCamera() throws {
+        let (model, provider) = Self.placedModel()
+        let oldAnchor = try #require(model.sceneState.anchorID)
+
+        model.recenter()
+
+        let newAnchor = try #require(model.sceneState.anchorID)
+        #expect(newAnchor != oldAnchor)
+        #expect(provider.anchors[oldAnchor] == nil)
+        #expect(provider.anchors.count == 1)
+
+        // Level with the camera and `distance` along its flattened heading,
+        // not down the pitched view ray into the floor.
+        let anchor = try #require(provider.anchors[newAnchor])
+        let expected = SIMD3<Float>(1 - PlacementFallback.distance, 1.4, 2)
+        #expect(simd_distance(anchor.columns.3.xyz, expected) < 1e-4)
+        #expect(model.sceneState.placedTransform == anchor)
+        #expect(model.currentAnchorTransform == anchor)
+
+        #expect(model.sceneState.translation == .zero)
+        #expect(model.sceneState.scale == 0.4)
+        #expect(model.sceneState.yaw == 1.1)
+        #expect(model.sceneState.placementState == .placed)
+    }
+
+    /// The old anchor's heading survives, so the splat doesn't visibly spin.
+    @Test func recenterKeepsTheAnchorHeading() throws {
+        let (model, provider) = Self.placedModel()
+        model.recenter()
+        let anchor = try #require(model.sceneState.anchorID.flatMap { provider.anchors[$0] })
+        let expected = matrix4x4_rotation(radians: 0.7, axis: SIMD3<Float>(0, 1, 0))
+        for column in 0..<3 {
+            #expect(simd_distance(anchor[column], expected[column]) < 1e-4)
+        }
+    }
+
+    @Test func recenterWhileAwaitingPlacementIsANoOp() {
+        let (model, provider) = Self.placedModel()
+        model.beginPlacement()
+        let anchors = provider.anchors
+        let placed = model.sceneState.placedTransform
+        let translation = model.sceneState.translation
+
+        model.recenter()
+
+        #expect(model.sceneState.placementState == .awaitingSurface)
+        #expect(model.sceneState.anchorID == nil)
+        #expect(provider.anchors == anchors)
+        #expect(model.sceneState.placedTransform == placed)
+        #expect(model.sceneState.translation == translation)
+        #expect(provider.recenterCount == 1)
+    }
+
+    /// The simulator resets its joystick camera, then the splat lands ahead
+    /// of where it reset to.
+    @Test func simulatedRecenterResetsTheCameraAndFollowsIt() throws {
+        let provider = SimulatedPoseProvider()
+        let model = ViewerModel(makeProvider: { _ in provider })
+        let start = provider.pose
+        model.beginPlacement()
+        model.confirmPlacement()
+        provider.moveInput = SIMD2(1, 1)
+        provider.lookInput = SIMD2(1, 0)
+        provider.update(deltaTime: 0.4)
+        #expect(provider.pose != start)
+
+        model.recenter()
+
+        #expect(provider.pose == start)
+        let anchor = try #require(model.sceneState.anchorID.flatMap { provider.anchorTransform(for: $0) })
+        let expected = start.position + SIMD3(0, 0, -PlacementFallback.distance)
+        #expect(simd_distance(anchor.columns.3.xyz, expected) < 1e-4)
+    }
+
+    @Test func recenterWithoutSurfacesOnlyRecentersTheProvider() {
+        let provider = StubPoseProvider()
+        let model = ViewerModel(makeProvider: { _ in provider })
+        model.recenter()
+        #expect(provider.recenterCount == 1)
+        #expect(model.sceneState.anchorID == nil)
+        #expect(model.sceneState.placedTransform == matrix_identity_float4x4)
+    }
+
+    /// Straight down has no horizontal forward; screen-up is where the user
+    /// faces, so the splat goes there rather than onto the camera.
+    @Test func recenterLookingStraightDownUsesScreenUp() {
+        let camera = matrix4x4_translation(0, 1.5, 0)
+            * matrix4x4_rotation(radians: -.pi / 2, axis: SIMD3<Float>(1, 0, 0))
+        let target = ViewerModel.recenterAnchorTransform(cameraTransform: camera,
+                                                         currentAnchor: matrix_identity_float4x4)
+        let expected = SIMD3<Float>(0, 1.5, -PlacementFallback.distance)
+        #expect(simd_distance(target.columns.3.xyz, expected) < 1e-4)
+    }
+
+    @Test func recenterLookingStraightUpUsesScreenDown() {
+        let camera = matrix4x4_translation(0, 1.5, 0)
+            * matrix4x4_rotation(radians: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+        let target = ViewerModel.recenterAnchorTransform(cameraTransform: camera,
+                                                         currentAnchor: matrix_identity_float4x4)
+        let expected = SIMD3<Float>(0, 1.5, -PlacementFallback.distance)
+        #expect(simd_distance(target.columns.3.xyz, expected) < 1e-4)
+    }
 }
 
 /// A pose provider with no surfaces and no camera: the shape of a device
@@ -224,8 +352,41 @@ struct ViewerModelTests {
 private final class StubPoseProvider: PoseProvider {
     var pose = CameraPose.identity
     var verticalFieldOfView: Float = 1
+    private(set) var recenterCount = 0
     func start() {}
     func stop() {}
     func update(deltaTime: TimeInterval) {}
-    func recenter() {}
+    func recenter() { recenterCount += 1 }
+}
+
+/// Shaped like ARKit for Recenter: surfaces and anchors, a camera the test
+/// sets directly, and a `recenter()` that moves nothing.
+@MainActor
+private final class StubSurfacePoseProvider: PoseProvider, SurfaceProvider {
+    var pose = CameraPose.identity
+    var verticalFieldOfView: Float = 1
+    private(set) var recenterCount = 0
+    func start() {}
+    func stop() {}
+    func update(deltaTime: TimeInterval) {}
+    func recenter() { recenterCount += 1 }
+
+    var candidate: PlacementCandidate?
+    private(set) var anchors: [UUID: simd_float4x4] = [:]
+
+    var isSurfaceDetectionEnabled = false
+    var detectedPlanes: [DetectedPlane] { [] }
+    var isPlacementActive = false
+    var placementCandidate: PlacementCandidate? { isPlacementActive ? candidate : nil }
+    var placementReadiness: PlacementReadiness { PlacementReadiness(candidate: placementCandidate) }
+
+    func makeAnchor(at transform: simd_float4x4) -> UUID? {
+        let id = UUID()
+        anchors[id] = transform
+        return id
+    }
+
+    func anchorTransform(for id: UUID) -> simd_float4x4? { anchors[id] }
+
+    func removeAnchor(_ id: UUID) { anchors.removeValue(forKey: id) }
 }

@@ -51,7 +51,14 @@ protocol PoseProvider: AnyObject {
     /// Advance time-based integration. Called once per rendered frame.
     func update(deltaTime: TimeInterval)
 
-    /// Make the current pose the origin.
+    /// Reset the provider's own virtual camera, if it has one.
+    ///
+    /// Called by `ViewerModel.recenter()` on every provider. Where the camera
+    /// is the physical phone (ARKit) there's nothing to reset and this is a
+    /// no-op; the poses a provider reports must stay in the same world frame
+    /// as its anchors and surfaces, so it may not shift its origin either.
+    /// Moving the splat to the camera is the model's job, done for any
+    /// provider that is also a `SurfaceProvider`.
     func recenter()
 
     /// A provider-supplied projection, e.g. from real camera intrinsics.

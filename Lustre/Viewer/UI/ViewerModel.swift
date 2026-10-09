@@ -391,8 +391,63 @@ final class ViewerModel {
         isPoseProviderRunning = false
     }
 
+    /// Brings a placed splat back in front of the camera.
+    ///
+    /// With anchored placement, shifting the camera's origin can't move
+    /// anything visible: the splat is pinned to the room, and the room doesn't
+    /// move. So Recenter re-anchors the splat at eye height a fixed distance
+    /// ahead instead, keeping the user's scale and rotation and dropping their
+    /// translation, which was relative to the old anchor.
+    ///
+    /// The provider still gets `recenter()` first, so the simulator's joystick
+    /// camera resets and the splat lands in front of where it reset to; ARKit
+    /// ignores it. While awaiting placement the preview already follows the
+    /// crosshair, so only the provider call happens.
     func recenter() {
         poseProvider.recenter()
+        guard let surfaceProvider, sceneState.placementState == .placed else { return }
+
+        let target = Self.recenterAnchorTransform(cameraTransform: poseProvider.pose.transform,
+                                                  currentAnchor: currentAnchorTransform)
+        if let anchorID = sceneState.anchorID {
+            surfaceProvider.removeAnchor(anchorID)
+        }
+        sceneState.placedTransform = target
+        sceneState.anchorID = surfaceProvider.makeAnchor(at: target)
+        sceneState.translation = .zero
+    }
+
+    /// Camera origin plus `PlacementFallback.distance` along the camera's
+    /// heading, carrying over only the current anchor's heading.
+    ///
+    /// The heading is flattened to horizontal so looking at the floor or the
+    /// ceiling doesn't bury the splat in either. When the camera looks
+    /// straight up or down there's no horizontal forward, so screen-up stands
+    /// in for it (it points where the user faces).
+    ///
+    /// The anchor's yaw is kept because raycast-hit anchors carry an arbitrary
+    /// one; a translation-only anchor would visibly spin the splat even though
+    /// `sceneState.yaw` didn't change. Its tilt is dropped, since a surface's
+    /// few degrees of slope mean nothing once the splat is lifted off it.
+    nonisolated static func recenterAnchorTransform(cameraTransform: simd_float4x4,
+                                                    currentAnchor: simd_float4x4) -> simd_float4x4 {
+        let origin = cameraTransform.columns.3.xyz
+        let forward = -cameraTransform.columns.2.xyz
+        var heading = SIMD3<Float>(forward.x, 0, forward.z)
+        if simd_length(heading) < 1e-3 {
+            let up = cameraTransform.columns.1.xyz * (forward.y < 0 ? 1 : -1)
+            heading = SIMD3<Float>(up.x, 0, up.z)
+        }
+        guard simd_length(heading) >= 1e-3 else {
+            return matrix4x4_translation(origin)
+        }
+        let position = origin + simd_normalize(heading) * PlacementFallback.distance
+
+        // Rotation about +Y by θ maps +X to (cos θ, 0, -sin θ).
+        let anchorX = currentAnchor.columns.0.xyz
+        let anchorYaw = abs(anchorX.x) + abs(anchorX.z) > 1e-4 ? atan2(-anchorX.z, anchorX.x) : 0
+        return matrix4x4_translation(position)
+            * matrix4x4_rotation(radians: anchorYaw, axis: SIMD3<Float>(0, 1, 0))
     }
 
     // MARK: - Background
