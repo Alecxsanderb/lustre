@@ -113,9 +113,6 @@ extension SimulatedPoseProvider: SurfaceProvider {
 
     private static let syntheticFloorY: Float = -1.5
     private static let syntheticFloorExtent = SIMD2<Float>(6, 6)
-    /// Where the candidate goes when the camera points at the sky and the ray
-    /// never meets the floor.
-    private static let fallbackDistance: Float = 2.0
 
     var isSurfaceDetectionEnabled: Bool {
         get { detectsSurfaces }
@@ -157,7 +154,8 @@ extension SimulatedPoseProvider: SurfaceProvider {
             }
         }
 
-        let estimate = origin + forward * Self.fallbackDistance
+        // The ray points at the sky and never meets the floor.
+        let estimate = origin + forward * PlacementFallback.distance
         return PlacementCandidate(transform: matrix4x4_translation(estimate),
                                   isOnSurface: false)
     }

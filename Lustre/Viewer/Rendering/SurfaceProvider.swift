@@ -54,8 +54,10 @@ struct PlacementCandidate: Equatable {
 /// both float the splat a fixed distance ahead of the camera. One constant so
 /// "Place anyway" and Recenter put the splat at the same distance.
 nonisolated enum PlacementFallback {
-    /// Meters ahead of the camera.
-    static let distance: Float = 1.5
+    /// Meters ahead of the camera. Was 1.5 m, which on device was far enough
+    /// that the splat showed too little parallax and seemed to move with the
+    /// camera.
+    static let distance: Float = 1.0
 }
 
 /// What the placement UI needs to know, coarsened so it changes only a few

@@ -77,6 +77,15 @@ struct PlacementReadinessTests {
         #expect(provider.placementReadiness == .estimated)
     }
 
+    /// Same distance as the device's "Place anyway" and as Recenter.
+    @Test func levelEstimateFloatsTheSharedFallbackDistanceAhead() throws {
+        let provider = activeProvider()
+        let candidate = try #require(provider.placementCandidate)
+        let expected = provider.pose.position + SIMD3(0, 0, -PlacementFallback.distance)
+        #expect(simd_distance(candidate.transform.columns.3.xyz, expected) < 1e-5)
+        #expect(PlacementFallback.distance == 1.0)
+    }
+
     @Test func lookingDownAtTheFloorIsOnSurface() {
         let provider = activeProvider()
         lookDown(provider)
