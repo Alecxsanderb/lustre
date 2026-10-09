@@ -53,6 +53,11 @@ nonisolated enum SpikeFormatChoice: Equatable, Sendable {
     /// Index into the candidate list (same order as `supportedVideoFormats`).
     case available(index: Int)
     case unavailable(reason: String)
+
+    var isAvailable: Bool {
+        if case .available = self { return true }
+        return false
+    }
 }
 
 nonisolated enum SpikeFormatSelection {

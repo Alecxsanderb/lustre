@@ -209,13 +209,6 @@ struct CaptureSpikeView: View {
     }
 }
 
-extension SpikeFormatChoice {
-    var isAvailable: Bool {
-        if case .available = self { return true }
-        return false
-    }
-}
-
 /// RealityKit `ARView` showing the spike's own session. It never configures
 /// or runs the session itself.
 private struct SpikeARPreview: UIViewRepresentable {
