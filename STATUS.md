@@ -8,10 +8,10 @@ long-term history is git. Replace entries, don't append.
 - Device: **iPhone 15 Pro** (the only test device).
 - App Store name: **LustreGS** ("Lustre" was taken). Bundle display name
   unchanged.
-- TestFlight: **1.0 (7) uploaded 2026-09-26** (`40f90c1`) and device-tested
-  by the user before 2026-10-08 (results under Recently done). The fixes
-  since (`f121875`..`ac7bcc8`) are not uploaded yet. The project file stays at build 1: uploads let App Store
-  Connect assign the build number (`manageAppVersionAndBuildNumber`).
+- TestFlight: **1.0 (8) uploaded 2026-10-09** from `spike/arkit-capture`
+  (`main`'s Recenter/fallback/SOG fixes plus the capture spike under
+  Settings › Spike). Not yet tested on device. 1.0 (7) was device-tested
+  before 2026-10-08 (results under Recently done).
 
 ## Current focus
 Steps 1-3 are done and device-tested on 1.0 (7). The bugs from that test
