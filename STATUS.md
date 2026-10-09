@@ -16,9 +16,10 @@ long-term history is git. Replace entries, don't append.
 ## Current focus
 Steps 1-3 are done and device-tested on 1.0 (7). The bugs from that test
 are fixed on `main` (simulator-verified only). **Next is step 4, Capture:
-locked camera mode.** The architect's plan is in `docs/capture-plan.md`. It
-needs the user's answers to its open decisions, then a throwaway on-device
-spike (ARKit-backed recording on the 15 Pro) before the real commits.
+locked camera mode.** The architect's plan is in `docs/capture-plan.md`. Its
+decisions are settled (user accepted all five recommendations 2026-10-08).
+The throwaway on-device spike (ARKit-backed recording on the 15 Pro) is in
+progress on `spike/arkit-capture`.
 
 ## Recently done
 - **2026-10-08, fixes from the 1.0 (7) device test** (197 tests pass).
@@ -155,7 +156,7 @@ spike (ARKit-backed recording on the 15 Pro) before the real commits.
   with a multi-million-splat capture.
 
 ## Next up
-1. User answers the Capture plan's open decisions (`docs/capture-plan.md`).
+1. ~~User answers the Capture plan's open decisions~~ done 2026-10-08.
 2. Capture step 0: throwaway on-device spike of ARKit-backed recording on
    the 15 Pro (formats, shutter lock holding, drops, tracking, thermal).
 3. Capture commits 1-10 per the plan.

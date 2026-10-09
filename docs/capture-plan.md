@@ -1,7 +1,7 @@
 # Capture step 4 plan: locked camera mode
 
 Architect plan, 2026-10-08. Covers ROADMAP Build order step 4. Not started.
-Decisions marked **Open** need the user before work begins.
+Decisions below are settled; the spike (commit 0) is next.
 
 ## Recommendation
 
@@ -27,23 +27,17 @@ exercise save → library → thumbnail → playback in the simulator. A plain
 shutter doesn't hold under ARKit or tracking falls apart at 1/250 s, ship
 step 4 on `AVCaptureSession` behind the same seam.
 
-## Open decisions
+## Decisions (user, 2026-10-08: accepted all recommendations)
 
-1. **ARKit-backed vs AVCaptureSession** (above). Recommended: ARKit, pending
-   the spike.
-2. **What "1080p" means.** ARKit's main format is 1920×1440 (4:3).
-   Recommended: the "HD" setting uses 1920×1440 when offered, 1920×1080
-   otherwise. 4:3 covers more scene per frame.
-3. **Container.** Recommended: fragmented `.mov`, so a crash or full disk
-   still leaves a playable file. Luma, Polycam, nerfstudio, ffmpeg accept it.
-   ROADMAP says MP4; fragmented MP4 support in AVAssetWriter is unconfirmed.
-4. **Audio.** Recommended: none (useless for training, extra permission).
-5. **Frame rate.** Recommended: 30 fps default, 60 optional. Shutter speed,
-   not frame rate, prevents blur; pipelines sample 2-5 fps; 30 halves storage
-   and heat. 4K is 30 fps only under ARKit.
+1. **ARKit-backed recording**, pending the spike. Fallback: AVCaptureSession
+   behind the same seam.
+2. **"HD" means 1920×1440 (4:3) when ARKit offers it**, else 1920×1080.
+3. **Fragmented `.mov`**, not MP4.
+4. **No audio.**
+5. **30 fps default, 60 optional** (60 unavailable with 4K under ARKit).
 
-Already decided by the user: HEVC default (H.264 option), 1080p-class
-default, captures browsable in an in-app library.
+Also decided: HEVC default (H.264 option), HD default, captures browsable in
+an in-app library (Splats | Captures switch in Library).
 
 ## Design
 
