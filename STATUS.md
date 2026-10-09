@@ -4,7 +4,7 @@ Snapshot of where things stand. Plan and build order live in ROADMAP.md;
 long-term history is git. Replace entries, don't append.
 
 ## Last updated
-- 2026-10-08
+- 2026-10-09
 - Device: **iPhone 15 Pro** (the only test device).
 - App Store name: **LustreGS** ("Lustre" was taken). Bundle display name
   unchanged.
@@ -14,19 +14,34 @@ long-term history is git. Replace entries, don't append.
   before 2026-10-08 (results under Recently done).
 
 ## Current focus
-Steps 1-3 are done and device-tested on 1.0 (7). The bugs from that test
-are fixed on `main` (simulator-verified only). **Next is step 4, Capture:
-locked camera mode.** The architect's plan is in `docs/capture-plan.md`. Its
-decisions are settled (user accepted all five recommendations 2026-10-08).
-The throwaway on-device spike (ARKit-backed recording on the 15 Pro) is
-**built on `spike/arkit-capture` (`9aa9f57`..`0a75d28`), not yet run on
-device**. Settings › Spike (temporary) › Capture spike; code in
-`Lustre/Capture/Spike/` (delete when done). Writes video, `<run>.json`, and
-`spike-report.txt` to Documents/CaptureSpike. 221 tests pass (24 new, pure
-logic only); simulator and Release device builds succeed. Everything
-ARKit/AVFoundation in it is unverified until the user runs it.
+Steps 1-3 are done and device-tested on 1.0 (7); the bugs from that test
+and their code-review follow-ups are fixed (simulator-verified only).
+**Step 4, Capture: locked camera mode** is next. The plan is
+`docs/capture-plan.md`, with all five decisions settled (user accepted the
+recommendations 2026-10-08). Commit 0, the throwaway on-device spike of
+ARKit-backed recording, is **built on `spike/arkit-capture`
+(`1d52d50`..`6643881`) and shipped in 1.0 (8), not yet run on device**.
+Settings › Spike (temporary) › Capture spike; code in `Lustre/Capture/Spike/`
+(delete when done). Writes video, `<run>.json`, and `spike-report.txt` to
+Documents/CaptureSpike. 221 tests pass (24 new, pure logic only); simulator
+and Release device builds succeed, and the simulator shows "ARKit
+unavailable" as intended. Everything ARKit/AVFoundation in it is unverified.
+Not reachable through ARKit: video stabilization (check footage for
+wobble). Color range tagging of the HEVC output needs a visual check.
 
 ## Recently done
+- **2026-10-08, code-review follow-ups on Recenter** (`305a211`..`75a918e`,
+  on `main`). Anchors are removed via the `ARAnchor` kept at creation, so a
+  quick double Recenter (or Recenter right after Place) no longer orphans
+  one in the session. Recenter waits for a tracked pose: new
+  `PoseProvider.hasTrackedPose` (ARKit: tracking `.normal`; simulator:
+  always true), and the menu's Recenter button is disabled without it.
+  Near-vertical gaze blends screen-up into the heading so the target
+  doesn't flip between taps. Tests cover all three. **Device-only parts
+  unverified.**
+- **2026-10-09, Photos-add usage string** (`6643881`, spike branch). The
+  share sheet's Save Video crashes without `NSPhotoLibraryAddUsageDescription`;
+  real Capture needs it too.
 - **2026-10-08, fixes from the 1.0 (7) device test** (197 tests pass).
   `f121875`: Recenter no longer offsets the ARKit pose (which mixed frames
   with anchors and raycasts). It now re-anchors a placed splat 1 m ahead at
@@ -125,11 +140,12 @@ ARKit/AVFoundation in it is unverified until the user runs it.
   Simulator build passes. On-device checks still needed: nudge direction,
   plane lookup, background/resume keeping the anchor, culling pop-in.
 - **Splat formats, settled:**
-  - Picker (`ViewerScreen.swift:92` → `SplatFileIO.importableContentTypes`)
-    offers `ply`, `spz`, `splat`, `sog`, `sogs`.
+  - Picker (`SplatFileIO.importableContentTypes`) offers `ply`, `spz`,
+    `splat` only (SOG hidden since `ac7bcc8`).
   - Parser (MetalSplatter 1.0.1 `SplatFileFormat` / `AutodetectSceneReader`)
     decodes `ply`, `spz`, `splat` only.
-  - `sog`/`sogs` are rejected before parsing with a format-specific message.
+  - `sog`/`sogs` arriving another way (dropped in via Files) are rejected
+    before parsing with a format-specific message.
 
 ## Known issues
 - **MetalSplatter's PLY reader hangs on body errors** (upstream bug in
@@ -161,17 +177,23 @@ ARKit/AVFoundation in it is unverified until the user runs it.
   with a multi-million-splat capture.
 
 ## Next up
-1. ~~User answers the Capture plan's open decisions~~ done 2026-10-08.
-2. Capture step 0: run the spike on the 15 Pro (HD30/HD60/4K30 × Auto,
-   1/250, 1/500 × Bright/Dim, orbit and return; 5 min 4K30 for thermal),
-   share `spike-report.txt` back, decide ARKit vs AVCaptureSession.
-3. Capture commits 1-10 per the plan.
-4. Next TestFlight: check Recenter (re-anchors 1 m ahead, stays put) and
-   Place anyway parallax at 1.0 m.
-5. Still unchecked on device from earlier: Share sheet, SPZ/`.splat`,
+1. On 1.0 (8): run the spike on the 15 Pro (priority set: Bright HD30
+   Auto, Bright HD30/HD60/4K30 at 1/250, Dim HD30 at 1/250 and 1/500, a
+   5 min 4K30 1/250 heat take, plus one background and one Control Center
+   interruption mid-take), share `spike-report.txt` back. Pass: <1% drops
+   at HD30/HD60/4K30, shutter lock holds, tracking normal indoors at 1/250.
+   Fail → step 4 ships on AVCaptureSession behind the same seam.
+2. Also on 1.0 (8): Recenter (re-anchors 1 m ahead, stays put; double tap
+   clean; button disabled until tracking), Recenter height vs a surface
+   placement (center at eye height may sit low), Place anyway parallax at
+   1.0 m.
+3. Merge the spike branch into `main` per the user (spike folder stays
+   isolated so it can be deleted after step 4 lands), then Capture commits
+   1-10 per the plan.
+4. Still unchecked on device from earlier: Share sheet, SPZ/`.splat`,
    passthrough + plane occlusion explicitly, background/resume with a placed
    splat, thumbnail-generation overlap with opening the Viewer (memory).
-6. Later: large-capture frame rate (see Known issues).
+5. Later: large-capture frame rate (see Known issues).
 
 ## Open questions
 - File the MetalSplatter PLY-hang issue upstream? (Explained to the user

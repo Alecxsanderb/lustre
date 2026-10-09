@@ -75,8 +75,8 @@ root; features report picks through callbacks and this layer routes them.
 
 **Dependencies:** Library (read-only), navigation links to Viewer / Capture / Settings
 
-**Status:** Basic version built (step 2). Capture CTA is shown disabled
-until Capture exists; the settings entry waits for step 3.
+**Status:** Basic version built (step 2), with the Settings gear (step 3).
+Capture CTA is shown disabled until Capture step 1 lands.
 
 ---
 
@@ -88,7 +88,8 @@ equivalent for splats.
 **Scope:**
 - Grid view with thumbnails
 - Metadata: name, capture date, file size, source (captured vs imported)
-- Import from Files (PLY, SPZ, .splat; SOG recognized but not yet decodable)
+- Import from Files (PLY, SPZ, .splat; SOG hidden from the picker until
+  there's a decoder, and rejected with a specific message if dropped in)
 - Delete, rename, share (export as PLY/SPZ via share sheet)
 - Sort by date, name, size
 
@@ -143,7 +144,10 @@ provider is active, so an AR-specific view had nothing left to do.
 - 6DoF AR pose drives the virtual camera through the splat
 - Simulator mode with dual joysticks for AR-less testing
 - Tap-to-place on a detected surface on load, anchored so ARKit's corrections
-  keep it put; re-place from the menu
+  keep it put; re-place from the menu. "Place anyway" (no surface) floats it
+  1 m ahead
+- Recenter: re-anchors a placed splat 1 m ahead at eye height, keeping its
+  size and rotation; disabled until tracking is normal
 - Manual placement: log-scale sizing, yaw (plus pitch/roll), camera-relative
   translation, all pivot-bracketed so they act in place
 - Position indicators (axis bars, drop line, surface outlines), toggleable —
@@ -216,13 +220,19 @@ inconsistent lighting.
 
 **Scope (in rough build order, each step is independently useful):**
 
-1. **Locked camera mode.** Wrap `AVCaptureSession` with sensible splat
-   defaults:
-   - Fast shutter (1/250s or faster) to minimize motion blur
-   - Locked exposure after initial frame
-   - Locked focus (manual or auto-then-lock)
-   - Locked white balance
-   - 4K30 or 1080p60, H.264 in MP4
+1. **Locked camera mode.** Plan: `docs/capture-plan.md`. Decided
+   2026-10-08:
+   - Recorded through ARKit (pending an on-device spike), behind a
+     `CaptureSource` seam with a simulated source for the simulator, so
+     steps 2-4 can run ARKit while recording
+   - Fast shutter (1/250s or faster), exposure/white balance locked after
+     metering, focus locked at record start
+   - HD (1920×1440 4:3 when ARKit offers it, else 1080p) at 30 fps default,
+     60 optional; 4K30 optional
+   - HEVC default (H.264 option), fragmented `.mov`, no audio
+   - Per-frame camera poses and intrinsics saved as a sidecar
+   - Saved to `Documents/Captures/` and browsable in a Splats | Captures
+     switch in Library
    - Expose only the few settings that matter; hide the rest
 
 2. **Pre-capture path planner.** Before recording, user sketches a rough
@@ -251,9 +261,9 @@ inconsistent lighting.
    - The Training feature for on-device (when ready)
    - ZIP of raw frames for users with custom pipelines
 
-**Key components:** `CaptureSession` (AVFoundation wrapper),
-`PathPlannerView`, `CoachingOverlay`, `MotionAnalyzer` (CoreMotion + ARKit),
-`ClipManager`
+**Key components:** `CaptureSource` (ARKit / simulated), `VideoWriter`,
+`CaptureLibrary` (service), `PathPlannerView`, `CoachingOverlay`,
+`MotionAnalyzer` (CoreMotion + ARKit), `ClipManager`
 
 **Dependencies:** AVFoundation, ARKit, CoreMotion, Core, Services
 
@@ -262,8 +272,11 @@ inconsistent lighting.
 - Path planner presets — useful or noise?
 - What's the right "this video will splat well" metric? Coverage score? Sharpness?
 
-**Status:** Planned. Biggest unknowns. Build the smallest useful slice
-(locked camera mode) first.
+**Status:** Step 1 planned (`docs/capture-plan.md`). Its on-device spike
+(ARKit format list, exposure locking, HEVC recording, drop/lock/tracking/
+thermal metrics) is built on `spike/arkit-capture` and in TestFlight
+1.0 (8), awaiting a run on the iPhone 15 Pro. It decides ARKit vs
+AVCaptureSession for step 1.
 
 ---
 
@@ -372,7 +385,8 @@ Each step ends with something runnable and testable:
 3. ~~**Settings (minimal).**~~ **Done.** Initial size preset and a
    simulator-only joystick speed via `@AppStorage`, plus a unit test target.
 4. **Capture: locked camera mode only.** Simplest possible "press to record
-   a splat-friendly video." Export MP4 to Files.
+   a splat-friendly video," saved to an in-app captures library (also in
+   Files). **In progress:** plan done, device spike in TestFlight 1.0 (8).
 5. **Capture: path planner.** AR waypoints before recording starts.
 6. **Capture: live coaching.** Motion analysis, real-time warnings.
 7. **Capture: multi-clip.** Pause/resume, splicing.
