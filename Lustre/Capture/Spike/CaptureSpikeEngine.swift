@@ -55,6 +55,8 @@ nonisolated final class CaptureSpikeEngine: NSObject, ARSessionDelegate, @unchec
     private var wantsFocusLock = false
     private var latestDeviations: [String] = []
 
+    private var recording: SpikeRecording?
+
     /// - Parameter onStats: called on the main actor at ~4 Hz.
     init(onStats: @escaping @MainActor @Sendable (SpikeLiveStats) -> Void) {
         self.onStats = onStats
@@ -91,6 +93,52 @@ nonisolated final class CaptureSpikeEngine: NSObject, ARSessionDelegate, @unchec
         }
     }
 
+    /// Recording starts at the next frame. Focus locks now.
+    func startRecording(_ request: SpikeRecordingRequest) {
+        queue.async {
+            guard self.recording == nil else { return }
+            let recording = SpikeRecording(request: request, preset: self.preset, exposure: self.exposure,
+                                           startUptime: ProcessInfo.processInfo.systemUptime)
+            recording.trackingEvents.append(SpikeEvent(time: 0, value: self.trackingState))
+            recording.lastThermal = ProcessInfo.processInfo.thermalState
+            recording.thermalEvents.append(SpikeEvent(time: 0, value: Self.describe(recording.lastThermal)))
+            self.recording = recording
+            self.beginFocusLock()
+            self.pushStats()
+        }
+    }
+
+    /// Finishes the file, saves the report, and calls `completion` on the
+    /// main actor. Safe to call with nothing recording (reports nil).
+    func stopRecording(completion: @escaping @MainActor @Sendable (SpikeStopResult?) -> Void) {
+        queue.async {
+            guard let recording = self.recording else {
+                Task { @MainActor in completion(nil) }
+                return
+            }
+            self.recording = nil
+            // Snapshot lock state before releasing focus for preview.
+            let lockTarget = self.lockTarget
+            let exposureSetting = self.appliedExposure
+            let lockNote = self.lockNote
+            self.endFocusLock()
+            self.pushStats()
+
+            let save: @Sendable (SpikeVideoWriter.Outcome) -> Void = { outcome in
+                self.queue.async {
+                    let result = self.saveReport(for: recording, outcome: outcome, lockTarget: lockTarget,
+                                                 exposureSetting: exposureSetting, lockNote: lockNote)
+                    Task { @MainActor in completion(result) }
+                }
+            }
+            if let writer = recording.writer {
+                writer.finish(completion: save)
+            } else {
+                save(.init(status: "not started", error: recording.writerSetupError ?? "no frames arrived"))
+            }
+        }
+    }
+
     func pause() {
         session.pause()
         queue.async { self.trackingState = "paused" }
@@ -106,14 +154,10 @@ nonisolated final class CaptureSpikeEngine: NSObject, ARSessionDelegate, @unchec
             imageDescription = "\(CVPixelBufferGetWidth(image))×\(CVPixelBufferGetHeight(image)) "
                 + SpikeRunNaming.fourCC(CVPixelBufferGetPixelFormatType(image))
         }
+        if let recording { record(frame, into: recording) }
         if now - lastReadback >= 1 {
             lastReadback = now
-            latestReading = readDevice(at: ProcessInfo.processInfo.systemUptime - sessionStartUptime)
-            if let reading = latestReading, case .held = lockPhase {
-                latestDeviations = SpikeLockCheck.deviations(of: reading, from: lockTarget)
-            } else {
-                latestDeviations = []
-            }
+            readBack()
         }
         if now - lastStatsPush >= 0.25 {
             lastStatsPush = now
@@ -123,19 +167,23 @@ nonisolated final class CaptureSpikeEngine: NSObject, ARSessionDelegate, @unchec
 
     func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
         trackingState = Self.describe(camera.trackingState)
+        recording?.trackingEvents.append(SpikeEvent(time: recordingTime, value: trackingState))
     }
 
     func session(_ session: ARSession, didFailWithError error: Error) {
         sessionError = error.localizedDescription
+        recording?.interruptions.append(SpikeEvent(time: recordingTime, value: "session failed: \(error.localizedDescription)"))
         pushStats()
     }
 
     func sessionWasInterrupted(_ session: ARSession) {
         trackingState = "interrupted"
+        recording?.interruptions.append(SpikeEvent(time: recordingTime, value: "interrupted"))
     }
 
     func sessionInterruptionEnded(_ session: ARSession) {
         // ARKit may have reset the device while the camera was away.
+        recording?.interruptions.append(SpikeEvent(time: recordingTime, value: "interruption ended, re-locking"))
         requestLock()
     }
 
@@ -274,6 +322,125 @@ nonisolated final class CaptureSpikeEngine: NSObject, ARSessionDelegate, @unchec
         }
     }
 
+    // MARK: - Recording (queue)
+
+    private var recordingTime: Double {
+        recording.map { ProcessInfo.processInfo.systemUptime - $0.startUptime } ?? 0
+    }
+
+    private func record(_ frame: ARFrame, into recording: SpikeRecording) {
+        let accepted = recording.timing.record(frame.timestamp)
+        let column = frame.camera.transform.columns.3
+        let position = [column.x, column.y, column.z]
+        if recording.startPosition == nil { recording.startPosition = position }
+        recording.endPosition = position
+        guard accepted else { return }
+
+        // Only the pixel buffer outlives this call (the writer retains it
+        // until encoded); the ARFrame itself is never kept.
+        let image = frame.capturedImage
+        let time = CMTime(seconds: frame.timestamp, preferredTimescale: 1_000_000)
+        if recording.writer == nil, recording.writerSetupError == nil {
+            let width = CVPixelBufferGetWidth(image)
+            let height = CVPixelBufferGetHeight(image)
+            recording.imageWidth = width
+            recording.imageHeight = height
+            recording.pixelFormat = SpikeRunNaming.fourCC(CVPixelBufferGetPixelFormatType(image))
+            do {
+                recording.writer = try SpikeVideoWriter(url: recording.request.videoURL, width: width, height: height,
+                                                        preset: recording.preset, startTime: time)
+            } catch {
+                recording.writerSetupError = error.localizedDescription
+            }
+        }
+        guard let writer = recording.writer else { return }
+        switch writer.append(image, at: time) {
+        case .written: recording.framesWritten += 1
+        case .droppedBackpressure: recording.framesDroppedBackpressure += 1
+        case .failed: recording.appendFailures += 1
+        }
+    }
+
+    private func readBack() {
+        let time = recording != nil ? recordingTime : ProcessInfo.processInfo.systemUptime - sessionStartUptime
+        latestReading = readDevice(at: time)
+        if let reading = latestReading, case .held = lockPhase {
+            latestDeviations = SpikeLockCheck.deviations(of: reading, from: lockTarget)
+        } else if let reading = latestReading, lockTarget.lensPosition != nil {
+            // Exposure still metering, but the focus lock can be checked.
+            latestDeviations = SpikeLockCheck.deviations(of: reading, from: SpikeLockTarget(lensPosition: lockTarget.lensPosition))
+        } else {
+            latestDeviations = []
+        }
+        guard let recording else { return }
+        if let reading = latestReading {
+            recording.readings.append(reading)
+            if !latestDeviations.isEmpty {
+                recording.deviatingReadings += 1
+                if recording.firstDeviation == nil {
+                    recording.firstDeviation = String(format: "t=%.1fs ", time) + latestDeviations.joined(separator: ", ")
+                }
+            }
+        }
+        let thermal = ProcessInfo.processInfo.thermalState
+        if thermal != recording.lastThermal {
+            recording.lastThermal = thermal
+            recording.thermalEvents.append(SpikeEvent(time: time, value: Self.describe(thermal)))
+        }
+    }
+
+    private func saveReport(for recording: SpikeRecording, outcome: SpikeVideoWriter.Outcome,
+                            lockTarget: SpikeLockTarget, exposureSetting: SpikeExposureSetting?,
+                            lockNote: String) -> SpikeStopResult {
+        let request = recording.request
+        var distance: Float?
+        if let start = recording.startPosition, let end = recording.endPosition {
+            distance = simd_distance(SIMD3(start[0], start[1], start[2]), SIMD3(end[0], end[1], end[2]))
+        }
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: request.videoURL.path)[.size] as? NSNumber)?.int64Value
+        var notes = [
+            "Exposure \(recording.exposure.rawValue) as selected at record start; changing it mid-take isn't recorded.",
+            "\"ARSession is retaining N ARFrames\" warnings only appear in the Xcode console. Starvation shows here as delivered < ~99% of nominal.",
+            "Video stabilization: ARKit exposes no AVCaptureConnection, so preferredVideoStabilizationMode can't be set. " + stabilizationNote(),
+            "Video HDR: configuration.videoHDRAllowed = false.",
+            "Track transform: 90° rotation for portrait. Color tags: BT.709 primaries/transfer/matrix.",
+        ]
+        if let setupError = recording.writerSetupError { notes.append("Writer setup failed: \(setupError)") }
+        let report = SpikeRunReport(
+            runName: request.runName, date: request.date, device: request.device,
+            preset: recording.preset, exposure: recording.exposure, lighting: request.lighting,
+            videoFormat: request.videoFormat, formatList: request.formatList,
+            imageWidth: recording.imageWidth, imageHeight: recording.imageHeight, pixelFormat: recording.pixelFormat,
+            timing: recording.timing, framesWritten: recording.framesWritten,
+            framesDroppedBackpressure: recording.framesDroppedBackpressure, appendFailures: recording.appendFailures,
+            exposureSetting: exposureSetting, lockTarget: lockTarget, lockNote: lockNote,
+            readings: recording.readings, deviatingReadings: recording.deviatingReadings,
+            firstDeviation: recording.firstDeviation,
+            trackingEvents: recording.trackingEvents, interruptions: recording.interruptions,
+            thermalEvents: recording.thermalEvents,
+            startPosition: recording.startPosition, endPosition: recording.endPosition, returnDistanceMeters: distance,
+            videoFile: request.videoURL.lastPathComponent, videoBytes: bytes,
+            writerStatus: outcome.status, writerError: outcome.error, notes: notes)
+        do {
+            let url = try SpikeReportStore.save(report, in: request.directory)
+            return SpikeStopResult(summary: report.text, reportURL: url, saveError: nil)
+        } catch {
+            return SpikeStopResult(summary: report.text, reportURL: nil, saveError: error.localizedDescription)
+        }
+    }
+
+    private func stabilizationNote() -> String {
+        guard let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera else {
+            return "(no capture device)"
+        }
+        let modes: [(AVCaptureVideoStabilizationMode, String)] = [
+            (.standard, "standard"), (.cinematic, "cinematic"), (.cinematicExtended, "cinematicExtended"),
+        ]
+        let supported = modes.filter { device.activeFormat.isVideoStabilizationModeSupported($0.0) }.map(\.1)
+        return "Active format supports: " + (supported.isEmpty ? "none" : supported.joined(separator: ", "))
+            + ". ARKit's capturedImage is believed unstabilized; check the video for wobble."
+    }
+
     // MARK: - Device read-back (queue)
 
     private func readDevice(at time: Double) -> SpikeDeviceReading? {
@@ -305,6 +472,23 @@ nonisolated final class CaptureSpikeEngine: NSObject, ARSessionDelegate, @unchec
         stats.lockNote = lockNote
         stats.isUnderexposed = appliedExposure?.isUnderexposed ?? false
         stats.deviations = latestDeviations
+        if let recording {
+            stats.isRecording = true
+            stats.elapsed = recordingTime
+            stats.delivered = recording.timing.delivered
+            stats.nominal = recording.timing.nominalFrames
+            stats.written = recording.framesWritten
+            stats.droppedBackpressure = recording.framesDroppedBackpressure
+            stats.appendFailures = recording.appendFailures
+            stats.nonMonotonic = recording.timing.nonMonotonic
+            stats.maxGap = recording.timing.maxGap
+            stats.longGaps = recording.timing.longGaps
+            stats.deviatingReadings = recording.deviatingReadings
+            stats.writerError = recording.writerSetupError ?? recording.writer?.errorDescription
+            if let start = recording.startPosition, let end = recording.endPosition {
+                stats.distanceFromStart = simd_distance(SIMD3(start[0], start[1], start[2]), SIMD3(end[0], end[1], end[2]))
+            }
+        }
         stats.image = imageDescription
         stats.thermal = Self.describe(ProcessInfo.processInfo.thermalState)
         return stats
@@ -375,6 +559,78 @@ nonisolated struct SpikeLiveStats: Equatable, Sendable {
     var isUnderexposed = false
     /// Non-empty when the last read-back no longer matches the lock.
     var deviations: [String] = []
+
+    var isRecording = false
+    var elapsed: Double = 0
+    var delivered = 0
+    var nominal = 0
+    var written = 0
+    var droppedBackpressure = 0
+    var appendFailures = 0
+    var nonMonotonic = 0
+    var maxGap: Double = 0
+    var longGaps = 0
+    var deviatingReadings = 0
+    var writerError: String?
+    var distanceFromStart: Float?
     var image = "—"
     var thermal = "—"
+}
+
+/// What the model hands the engine at record start.
+nonisolated struct SpikeRecordingRequest: Sendable {
+    var runName: String
+    var directory: URL
+    var date: Date
+    var device: String
+    var lighting: SpikeLighting
+    var videoFormat: String
+    var formatList: String
+
+    var videoURL: URL { directory.appendingPathComponent(runName + ".mov") }
+}
+
+nonisolated struct SpikeStopResult: Sendable {
+    var summary: String
+    var reportURL: URL?
+    var saveError: String?
+}
+
+/// One take's mutable state. Confined to the engine's queue, like the
+/// engine itself; `@unchecked Sendable` only so the writer's completion can
+/// carry it back onto that queue.
+nonisolated final class SpikeRecording: @unchecked Sendable {
+    let request: SpikeRecordingRequest
+    let preset: SpikePreset
+    let exposure: SpikeExposureMode
+    let startUptime: Double
+
+    var writer: SpikeVideoWriter?
+    var writerSetupError: String?
+    var timing: SpikeFrameTiming
+    var framesWritten = 0
+    var framesDroppedBackpressure = 0
+    var appendFailures = 0
+
+    var imageWidth: Int?
+    var imageHeight: Int?
+    var pixelFormat: String?
+
+    var readings: [SpikeDeviceReading] = []
+    var deviatingReadings = 0
+    var firstDeviation: String?
+    var trackingEvents: [SpikeEvent] = []
+    var interruptions: [SpikeEvent] = []
+    var thermalEvents: [SpikeEvent] = []
+    var lastThermal = ProcessInfo.ThermalState.nominal
+    var startPosition: [Float]?
+    var endPosition: [Float]?
+
+    init(request: SpikeRecordingRequest, preset: SpikePreset, exposure: SpikeExposureMode, startUptime: Double) {
+        self.request = request
+        self.preset = preset
+        self.exposure = exposure
+        self.startUptime = startUptime
+        timing = SpikeFrameTiming(framesPerSecond: preset.framesPerSecond)
+    }
 }

@@ -34,6 +34,19 @@ final class CaptureSpikeModel {
 
     private(set) var stats = SpikeLiveStats()
 
+    private(set) var isRecording = false
+    /// Between Stop and the report being saved.
+    private(set) var isFinishing = false
+    private(set) var lastRunSummary: String?
+    private(set) var lastError: String?
+    private(set) var reportURL: URL?
+
+    /// Documents/CaptureSpike: visible in Files, and deliberately not
+    /// Documents/Splats, which the library treats as splats.
+    static var directory: URL {
+        URL.documentsDirectory.appendingPathComponent("CaptureSpike", isDirectory: true)
+    }
+
     @ObservationIgnored private var engine: CaptureSpikeEngine?
     @ObservationIgnored private var isOnScreen = false
     @ObservationIgnored private var isSessionRunning = false
@@ -60,6 +73,52 @@ final class CaptureSpikeModel {
         engineIfSupported()?.session
     }
 
+    // MARK: - Recording
+
+    func toggleRecording() {
+        if isRecording { stopRecording() } else { startRecording() }
+    }
+
+    private func startRecording() {
+        guard let engine, isSessionRunning, !isFinishing,
+              case .available(let index) = availability[preset] else { return }
+        do {
+            try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
+        } catch {
+            lastError = "Couldn't create CaptureSpike folder: \(error.localizedDescription)"
+            return
+        }
+        let date = Date()
+        let request = SpikeRecordingRequest(
+            runName: SpikeRunNaming.runName(date: date, preset: preset, exposure: exposure, lighting: lighting),
+            directory: Self.directory, date: date, device: Self.deviceDescription, lighting: lighting,
+            videoFormat: Self.describe(formats[index]), formatList: formatListText)
+        engine.startRecording(request)
+        isRecording = true
+        lastError = nil
+    }
+
+    /// - Parameter completion: runs once the file and report are saved.
+    private func stopRecording(completion: (() -> Void)? = nil) {
+        guard isRecording, let engine else {
+            completion?()
+            return
+        }
+        isRecording = false
+        isFinishing = true
+        engine.stopRecording { [weak self] result in
+            if let self {
+                self.isFinishing = false
+                if let result {
+                    self.lastRunSummary = result.summary
+                    self.reportURL = result.reportURL ?? self.reportURL
+                    self.lastError = result.saveError.map { "Report not saved: \($0)" }
+                }
+            }
+            completion?()
+        }
+    }
+
     func previewAttached() {
         engine?.attachDelegate()
     }
@@ -76,6 +135,11 @@ final class CaptureSpikeModel {
         suspend()
     }
 
+    func refreshReportURL() {
+        let url = Self.directory.appendingPathComponent(SpikeReportStore.reportFileName)
+        reportURL = FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     func scenePhaseChanged(_ phase: ScenePhase) {
         switch phase {
         case .background:
@@ -87,7 +151,21 @@ final class CaptureSpikeModel {
         }
     }
 
+    /// Leaving the screen or the app: finalize any take under a background
+    /// task so the writer can finish, then stop the camera.
     private func suspend() {
+        if isRecording {
+            let application = UIApplication.shared
+            var task = UIBackgroundTaskIdentifier.invalid
+            task = application.beginBackgroundTask(withName: "Finish capture spike recording") {
+                application.endBackgroundTask(task)
+                task = .invalid
+            }
+            stopRecording {
+                if task != .invalid { application.endBackgroundTask(task) }
+                task = .invalid
+            }
+        }
         guard isSessionRunning else { return }
         isSessionRunning = false
         engine?.pause()
@@ -117,6 +195,15 @@ final class CaptureSpikeModel {
     }
 
     // MARK: - Formats
+
+    private static var deviceDescription: String {
+        var info = utsname()
+        uname(&info)
+        let machine = withUnsafeBytes(of: &info.machine) { buffer in
+            String(decoding: buffer.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
+        return "\(machine), iOS \(UIDevice.current.systemVersion)"
+    }
 
     nonisolated private static func candidate(_ format: ARConfiguration.VideoFormat) -> SpikeFormatCandidate {
         SpikeFormatCandidate(width: Int(format.imageResolution.width),
