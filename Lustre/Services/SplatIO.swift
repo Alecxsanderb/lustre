@@ -23,9 +23,12 @@ enum SplatFileIO {
     /// Compressed containers we recognize but cannot decode yet.
     ///
     /// MetalSplatter ships no reader for these at any version (checked through
-    /// `main`, 2026-07-19). They're listed so the picker still offers them and
-    /// the user gets a specific message naming the format, rather than a parse
-    /// failure from a reader that was never going to work.
+    /// `main`, 2026-07-19). The picker doesn't offer them: until there's a
+    /// decoder, picking one could only fail. They're still recognized so a
+    /// file that arrives another way (dropped into Documents/Splats/ through
+    /// Files, or handed to `SplatLibrary.importFiles`) gets a specific message
+    /// naming the format, rather than a parse failure from a reader that was
+    /// never going to work.
     nonisolated static let recognizedButUnsupportedExtensions = ["sog", "sogs"]
 
     /// SPZ files above this size get no thumbnail. The SPZ reader decompresses
@@ -78,7 +81,8 @@ enum SplatFileIO {
         }
     }
 
-    /// File types the import picker offers.
+    /// File types the import picker offers: only the ones we can read, so not
+    /// `recognizedButUnsupportedExtensions`.
     ///
     /// Only `ply` has a system-declared type (`public.polygon-file-format`);
     /// the rest resolve to dynamic `dyn.*` types synthesized from the
@@ -86,7 +90,7 @@ enum SplatFileIO {
     /// include `.data` — every regular file conforms to it, which would make
     /// the filter a no-op and let the user pick a JPEG.
     static var importableContentTypes: [UTType] {
-        let types = (readableExtensions + recognizedButUnsupportedExtensions)
+        let types = readableExtensions
             .compactMap { UTType(filenameExtension: $0) }
         // An empty list would leave the picker unable to select anything.
         return types.isEmpty ? [.data] : types

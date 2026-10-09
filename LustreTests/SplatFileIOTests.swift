@@ -10,6 +10,7 @@
 import Foundation
 import Testing
 import SplatIO
+import UniformTypeIdentifiers
 @testable import Lustre
 
 struct SplatFileIOTests {
@@ -116,6 +117,37 @@ struct SplatFileIOTests {
         guard case .tooLargeForThumbnail = error else {
             Issue.record("expected tooLargeForThumbnail, got \(String(describing: error))"); return
         }
+    }
+
+    // MARK: - Picker
+
+    /// SOG is hidden until there's a decoder: picking one could only fail.
+    @MainActor @Test func pickerOffersOnlyReadableFormats() {
+        let offered = SplatFileIO.importableContentTypes
+        let expected = SplatFileIO.readableExtensions.compactMap { UTType(filenameExtension: $0) }
+        #expect(offered == expected)
+        for unsupported in SplatFileIO.recognizedButUnsupportedExtensions {
+            let type = UTType(filenameExtension: unsupported)
+            #expect(type.map { !offered.contains($0) } ?? true, "\(unsupported) is offered")
+        }
+    }
+
+    /// A SOG that reaches import some other way still gets the specific
+    /// message rather than "not a splat format".
+    @MainActor @Test func importStillNamesSOG() async throws {
+        let directory = try TemporaryDirectory()
+        defer { directory.remove() }
+        let folder = directory.url.appending(path: "Splats", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let source = try write(Data([1, 2, 3]), named: "scan.sog", in: directory)
+        let library = SplatLibrary(folderURL: folder,
+                                   indexURL: directory.url.appending(path: "index.json"),
+                                   thumbnailCache: nil)
+
+        let failures = await library.importFiles([source])
+
+        #expect(failures == [SplatFileIO.LoadError.notYetSupported(source).localizedDescription])
+        #expect(library.items.isEmpty)
     }
 
     // MARK: - Shared validation
