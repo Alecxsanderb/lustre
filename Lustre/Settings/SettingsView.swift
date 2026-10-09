@@ -19,6 +19,10 @@ struct SettingsView: View {
     /// need the library itself.
     let librarySizeInBytes: Int64
 
+    /// Opens the throwaway capture spike. Injected by `ContentView` so
+    /// Settings never references Capture. Nil hides the section.
+    var onOpenCaptureSpike: (() -> Void)? = nil
+
     @AppStorage(AppPreferences.Key.initialSize)
     private var initialSizeRawValue = AppPreferences.defaults.initialSize.rawValue
 
@@ -61,6 +65,16 @@ struct SettingsView: View {
             #if targetEnvironment(simulator)
             simulatorSection
             #endif
+
+            if let onOpenCaptureSpike {
+                Section {
+                    Button("Capture spike", action: onOpenCaptureSpike)
+                } header: {
+                    Text("Spike (temporary)")
+                } footer: {
+                    Text("On-device measurement tool for ARKit recording. Videos and reports go to Lustre › CaptureSpike in Files.")
+                }
+            }
 
             Section("Storage") {
                 LabeledContent("Library",

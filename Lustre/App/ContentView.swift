@@ -17,6 +17,8 @@ struct ContentView: View {
     private enum Route: Hashable {
         case library
         case settings
+        /// Throwaway capture spike (Capture commit 0), opened from Settings.
+        case captureSpike
         case viewer(ViewerContent)
     }
 
@@ -45,7 +47,10 @@ struct ContentView: View {
                     case .library:
                         LibraryView(library: library, onOpen: open, onOpenSample: openSample)
                     case .settings:
-                        SettingsView(librarySizeInBytes: library.items.reduce(0) { $0 + $1.fileSize })
+                        SettingsView(librarySizeInBytes: library.items.reduce(0) { $0 + $1.fileSize },
+                                     onOpenCaptureSpike: { path.append(.captureSpike) })
+                    case .captureSpike:
+                        CaptureSpikeView()
                     case .viewer(let content):
                         ViewerScreen(content: content,
                                      preferences: AppPreferences(reading: .standard),
