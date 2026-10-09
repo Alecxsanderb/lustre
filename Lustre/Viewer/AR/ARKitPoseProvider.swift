@@ -57,7 +57,11 @@ final class ARKitPoseProvider: NSObject, PoseProvider {
     /// properties).
     fileprivate var detectsSurfaces = false
     fileprivate var planes: [DetectedPlane] = []
-    fileprivate var placedAnchorIDs: Set<UUID> = []
+    /// Every anchor this provider added, kept at creation. An anchor only
+    /// shows up in `session.currentFrame?.anchors` from the next frame on, so
+    /// looking it up there to remove it misses one added this frame — two
+    /// quick Recenters, or a Recenter right after Confirm, would orphan it.
+    fileprivate var placedAnchors: [UUID: ARAnchor] = [:]
     fileprivate var wantsPlacementCandidate = false
 
     /// Refreshed once per frame in `update(deltaTime:)` while placement is
@@ -332,21 +336,28 @@ extension ARKitPoseProvider: SurfaceProvider {
         guard isRunning else { return nil }
         let anchor = ARAnchor(name: "splat", transform: transform)
         session.add(anchor: anchor)
-        placedAnchorIDs.insert(anchor.identifier)
+        placedAnchors[anchor.identifier] = anchor
         return anchor.identifier
     }
 
     /// Re-read every frame. ARKit refines anchor transforms as its map
     /// improves; a cached copy is exactly what makes a splat appear to drift.
+    ///
+    /// Until the anchor reaches a frame (the frame after `makeAnchor`) the
+    /// transform it was created with is the best there is. Nil only for an
+    /// anchor this provider doesn't own.
     func anchorTransform(for id: UUID) -> simd_float4x4? {
-        session.currentFrame?.anchors.first { $0.identifier == id }?.transform
+        guard let placed = placedAnchors[id] else { return nil }
+        return session.currentFrame?.anchors.first { $0.identifier == id }?.transform
+            ?? placed.transform
     }
 
+    /// Removes via the anchor kept at creation, not the current frame's
+    /// copy, so it works even before the anchor has reached a frame. ARKit
+    /// matches anchors by identifier, so the original object is enough.
     func removeAnchor(_ id: UUID) {
-        guard let anchor = session.currentFrame?.anchors.first(where: { $0.identifier == id })
-        else { return }
+        guard let anchor = placedAnchors.removeValue(forKey: id) else { return }
         session.remove(anchor: anchor)
-        placedAnchorIDs.remove(id)
     }
 
     /// Mirrors ARKit's plane anchors into the ARKit-free `DetectedPlane` type.
