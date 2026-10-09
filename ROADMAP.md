@@ -274,7 +274,7 @@ inconsistent lighting.
 
 **Status:** Step 1 planned (`docs/capture-plan.md`). Its on-device spike
 (ARKit format list, exposure locking, HEVC recording, drop/lock/tracking/
-thermal metrics) is built on `spike/arkit-capture` and in TestFlight
+thermal metrics) is built (`Lustre/Capture/Spike/`) and in TestFlight
 1.0 (8), awaiting a run on the iPhone 15 Pro. It decides ARKit vs
 AVCaptureSession for step 1.
 
