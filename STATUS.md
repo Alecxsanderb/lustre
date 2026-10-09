@@ -18,8 +18,13 @@ Steps 1-3 are done and device-tested on 1.0 (7). The bugs from that test
 are fixed on `main` (simulator-verified only). **Next is step 4, Capture:
 locked camera mode.** The architect's plan is in `docs/capture-plan.md`. Its
 decisions are settled (user accepted all five recommendations 2026-10-08).
-The throwaway on-device spike (ARKit-backed recording on the 15 Pro) is in
-progress on `spike/arkit-capture`.
+The throwaway on-device spike (ARKit-backed recording on the 15 Pro) is
+**built on `spike/arkit-capture` (`9aa9f57`..`0a75d28`), not yet run on
+device**. Settings › Spike (temporary) › Capture spike; code in
+`Lustre/Capture/Spike/` (delete when done). Writes video, `<run>.json`, and
+`spike-report.txt` to Documents/CaptureSpike. 221 tests pass (24 new, pure
+logic only); simulator and Release device builds succeed. Everything
+ARKit/AVFoundation in it is unverified until the user runs it.
 
 ## Recently done
 - **2026-10-08, fixes from the 1.0 (7) device test** (197 tests pass).
@@ -157,8 +162,9 @@ progress on `spike/arkit-capture`.
 
 ## Next up
 1. ~~User answers the Capture plan's open decisions~~ done 2026-10-08.
-2. Capture step 0: throwaway on-device spike of ARKit-backed recording on
-   the 15 Pro (formats, shutter lock holding, drops, tracking, thermal).
+2. Capture step 0: run the spike on the 15 Pro (HD30/HD60/4K30 × Auto,
+   1/250, 1/500 × Bright/Dim, orbit and return; 5 min 4K30 for thermal),
+   share `spike-report.txt` back, decide ARKit vs AVCaptureSession.
 3. Capture commits 1-10 per the plan.
 4. Next TestFlight: check Recenter (re-anchors 1 m ahead, stays put) and
    Place anyway parallax at 1.0 m.
