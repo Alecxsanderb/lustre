@@ -4,23 +4,39 @@ Snapshot of where things stand. Plan and build order live in ROADMAP.md;
 long-term history is git. Replace entries, don't append.
 
 ## Last updated
-- 2026-09-26
-- TestFlight: **1.0 (7) uploaded 2026-09-26** (`40f90c1`: placement and
-  depth-drag fixes, Viewer display defaults, Library thumbnails), not yet
-  tested on device. 1.0 (6) had only the placement/depth fixes. 1.0 (5)
-  (step 3 Settings) was device-tested 2026-09-26 and produced the bug reports
-  addressed since. The project file stays at build 1: uploads let App Store
+- 2026-10-08
+- Device: **iPhone 15 Pro** (the only test device).
+- App Store name: **LustreGS** ("Lustre" was taken). Bundle display name
+  unchanged.
+- TestFlight: **1.0 (7) uploaded 2026-09-26** (`40f90c1`) and device-tested
+  by the user before 2026-10-08 (results under Recently done). The fixes
+  since (`f121875`..`ac7bcc8`) are not uploaded yet. The project file stays at build 1: uploads let App Store
   Connect assign the build number (`manageAppVersionAndBuildNumber`).
 
 ## Current focus
-ROADMAP Build order **steps 2 (Library + Home) and 3 (Settings) are merged to
-`main`**, plus the fixes and features from the 1.0 (5) device test: placement
-overlay, depth-drag axes, Viewer display defaults, and Library thumbnails
-(pulled forward from the polish pass at the user's request). All verified in
-the simulator; none yet on device. Next is the on-device pass below, then
-step 4 (Capture: locked camera mode).
+Steps 1-3 are done and device-tested on 1.0 (7). The bugs from that test
+are fixed on `main` (simulator-verified only). **Next is step 4, Capture:
+locked camera mode.** The architect's plan is in `docs/capture-plan.md`. It
+needs the user's answers to its open decisions, then a throwaway on-device
+spike (ARKit-backed recording on the 15 Pro) before the real commits.
 
 ## Recently done
+- **2026-10-08, fixes from the 1.0 (7) device test** (197 tests pass).
+  `f121875`: Recenter no longer offsets the ARKit pose (which mixed frames
+  with anchors and raycasts). It now re-anchors a placed splat 1 m ahead at
+  eye height along the camera's horizontal heading, keeping scale, rotation,
+  and the old anchor's heading; translation resets. ARKit's `recenter()` is
+  a no-op; the simulator still resets its joystick camera first.
+  `7a8b46b`: the no-surface "Place anyway" fallback is 1.0 m ahead, not
+  1.5 m (the user found 1.5 m far enough to read as head-locked), shared
+  with the simulator via `PlacementFallback.distance`. `ac7bcc8`: SOG is
+  hidden from the picker; a `.sog` arriving via Files still gets the
+  specific message. **Recenter and the 1.0 m fallback need device testing.**
+- **1.0 (7) device test (user, iPhone 15 Pro, reported 2026-10-08).**
+  Working: placement overlay states and Place anyway, Viewer display
+  defaults, thumbnails, and "all Viewer features" (user's words; items not
+  enumerated). Confirmed bug: recenter then re-place lands off the
+  crosshair (fixed above). Frame rate on big captures still poor.
 - **2026-09-26, Library thumbnails** (`fe2933c`..`bcf495f`). Offscreen
   MetalSplatter render (`Services/Thumbnails/`) of a stride-decimated subsample
   (≤300k points, SH0 only), 480×360 JPEG in `Caches/Thumbnails/` keyed by
@@ -115,10 +131,10 @@ step 4 (Capture: locked camera mode).
   not filed yet; draft text exists.
 - **Viewer nav title is black on the black background** when passthrough is
   off (pre-existing; used to say "Viewer", now the splat name).
-- **Picker offers formats the parser can't read (SOG).** Deliberate, so the
-  user gets a specific error rather than a generic one, but still a mismatch.
-  Repro: import any `.sog` → "Lustre can't read SOG files yet. Export as PLY,
-  SPZ, or .splat."
+- **Frame rate on large captures is poor** (user, 15 Pro). The CPU sort
+  walks every splat; culling doesn't help that. Needs its own plan (size-aware
+  budget, or vendoring MetalSplatter); deferred until after Capture unless
+  the user wants it sooner.
 
 ## Suspected issues
 - **Thumbnail pause isn't a hard barrier before the Viewer's load.**
@@ -126,12 +142,6 @@ step 4 (Capture: locked camera mode).
   load doesn't await that; a render already in flight finishes. Overlap is
   bounded to one decimated scene (tens of MB), per code review. Confirm:
   open a large splat while a thumbnail is generating, watch memory on device.
-- **Recenter probably misaligns the splat on device.** `ARKitPoseProvider.recenter()`
-  folds an offset into `pose`, but raycast hits, the fallback candidate, and
-  `ARAnchor` transforms stay in raw ARKit world space, so after a recenter the
-  renderer's `pose.viewMatrix * anchor` mixes frames and the placement preview
-  would sit away from the crosshair. Found reading code 2026-09-26. Confirm:
-  recenter on device, then re-place.
 - **Passthrough camera plumbing and real-plane occlusion may be unexercised.**
   The AR pose path has run on device; these two are off by default, so the
   TestFlight run may not have touched them. Confirm: enable each on device.
@@ -145,32 +155,20 @@ step 4 (Capture: locked camera mode).
   with a multi-million-splat capture.
 
 ## Next up
-0. Run step 2 on device (TestFlight): import from Files/iCloud,
-   Share sheet, open a large capture from the Library.
-1. Run the review fixes on device: nudge arrows, drop line on
-   table vs floor, background then resume with a placed splat, a large
-   capture for culling pop-in.
-2. Confirm SPZ and `.splat` loading (may already be covered by the device run).
-3. On device (1.0 (7)): placement overlay goes Starting tracking → Place
-   anyway → Place; Place anyway works; drag, dolly, and nudges follow the
-   camera heading after placing on a detected surface (try a sloped one).
-   Also try recenter then re-place (see Suspected issues).
-   Plus: try each Initial size preset with tap-to-place, and confirm
-   the Simulator section is absent from the TestFlight build.
-4. On device: Viewer display defaults (see Recently done) carry over
-   between splats and match Settings; a fresh US-region install opens in feet.
-5. On device: Library/Home previews appear for real captures; watch memory
-   and scrolling jank while a multi-million-splat PLY or a just-under-20 MB
-   SPZ generates; opening the Viewer mid-generation doesn't stutter or crash.
-6. Then ROADMAP Build order step 4 (Capture: locked camera mode).
+1. User answers the Capture plan's open decisions (`docs/capture-plan.md`).
+2. Capture step 0: throwaway on-device spike of ARKit-backed recording on
+   the 15 Pro (formats, shutter lock holding, drops, tracking, thermal).
+3. Capture commits 1-10 per the plan.
+4. Next TestFlight: check Recenter (re-anchors 1 m ahead, stays put) and
+   Place anyway parallax at 1.0 m.
+5. Still unchecked on device from earlier: Share sheet, SPZ/`.splat`,
+   passthrough + plane occlusion explicitly, background/resume with a placed
+   splat, thumbnail-generation overlap with opening the Viewer (memory).
+6. Later: large-capture frame rate (see Known issues).
 
 ## Open questions
-- Is the App Store name "Lustre" reserved? (Every build upload resets the
-  90-day clock.)
-- Which iPhone is the device target? Which formats were in the ~10 test splats?
-- Keep SOG in the picker with its specific error, or hide it until there's a
-  decoder?
-- File the MetalSplatter PLY-hang issue upstream?
+- File the MetalSplatter PLY-hang issue upstream? (Explained to the user
+  2026-10-08; optional, needs their OK since it's public.)
 - `SplatLibrary` scans the folder synchronously on the main actor (init,
   foreground, after mutations). Fine at tens of files; revisit if Capture
   makes libraries large.
