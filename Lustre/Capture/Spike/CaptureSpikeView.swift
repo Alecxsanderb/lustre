@@ -48,6 +48,7 @@ struct CaptureSpikeView: View {
                 .clipped()
             List {
                 presetSection
+                exposureSection
                 liveSection
                 formatsSection
             }
@@ -78,6 +79,24 @@ struct CaptureSpikeView: View {
                 }
                 .disabled(!choice.isAvailable)
             }
+        }
+    }
+
+    private var exposureSection: some View {
+        Section {
+            Picker("Exposure", selection: $model.exposure) {
+                ForEach(SpikeExposureMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            row("Lock", model.stats.lockNote)
+            if !model.stats.deviations.isEmpty {
+                Text("Lock not holding: " + model.stats.deviations.joined(separator: ", "))
+                    .font(.caption).foregroundStyle(.red)
+            }
+        } header: {
+            Text("Exposure")
+        } footer: {
+            Text("Fixed shutters meter on auto for 30 frames, then lock shutter, ISO (raised to keep brightness) and white balance. Focus locks when recording starts.")
         }
     }
 

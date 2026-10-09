@@ -27,7 +27,9 @@ final class CaptureSpikeModel {
     var preset: SpikePreset = .hd30 {
         didSet { if preset != oldValue { runSession(resetTracking: true) } }
     }
-    var exposure: SpikeExposureMode = .auto
+    var exposure: SpikeExposureMode = .auto {
+        didSet { if exposure != oldValue { engine?.setExposure(exposure) } }
+    }
     var lighting: SpikeLighting = .bright
 
     private(set) var stats = SpikeLiveStats()
@@ -100,7 +102,7 @@ final class CaptureSpikeModel {
         configuration.isAutoFocusEnabled = true
         configuration.videoFormat = formats[index]
         configuration.videoHDRAllowed = false
-        engine.run(configuration, preset: preset, resetTracking: resetTracking)
+        engine.run(configuration, preset: preset, exposure: exposure, resetTracking: resetTracking)
         isSessionRunning = true
     }
 
